@@ -59,6 +59,7 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onImageLongPressed(url: String, pageUrl: String?, userAgent: String) {
         previewJob?.cancel()
+        _uiState.value.pending?.let { downloader.deleteLocalSource(it.url) }
         _uiState.update { it.copy(pending = PendingImage(url = url, pageUrl = pageUrl, userAgent = userAgent)) }
         previewJob = viewModelScope.launch {
             val bitmap = try {
@@ -77,13 +78,18 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun dismissPending() {
+        _uiState.value.pending?.let { downloader.deleteLocalSource(it.url) }
+        clearPending()
+    }
+
+    private fun clearPending() {
         previewJob?.cancel()
         _uiState.update { it.copy(pending = null) }
     }
 
     fun confirmPending() {
         val pending = _uiState.value.pending ?: return
-        dismissPending()
+        clearPending()
         download(
             sourceUrl = pending.url,
             candidates = ImageUrlResolver.candidates(pending.url, pending.pageUrl),
@@ -125,6 +131,7 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: Throwable) {
                 _uiState.update { it.copy(message = "画像の取得に失敗しました: ${e.message}") }
             } finally {
+                downloader.deleteLocalSource(sourceUrl)
                 _uiState.update { it.copy(downloadingCount = it.downloadingCount - 1) }
             }
         }

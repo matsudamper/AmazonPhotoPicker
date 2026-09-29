@@ -3,8 +3,10 @@ package net.matsudamper.amazonphotopicker
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -18,6 +20,8 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONTokener
 import java.util.UUID
 
@@ -40,7 +44,8 @@ class AmazonPhotoWebViewController(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val mobileUserAgent: String
     private val desktopUserAgent: String
-    private val pendingBlobTokens = mutableSetOf<String>()
+    private val blobDir = File(context.cacheDir, ImageDownloader.DIR_NAME)
+    private val blobTransfers = ConcurrentHashMap<String, BlobTransfer>()
     private var lastTouchX = 0f
     private var lastTouchY = 0f
 
@@ -230,7 +235,8 @@ class AmazonPhotoWebViewController(
     private fun fetchBlob(url: String) {
         // ページ内の任意のスクリプトからブリッジを呼ばれても無視できるよう、要求ごとのトークンで照合する
         val token = UUID.randomUUID().toString()
-        pendingBlobTokens += token
+        blobDir.mkdirs()
+        blobTransfers[token] = BlobTransfer(File(blobDir, "blob-$token.tmp"))
         val script = FETCH_BLOB_SCRIPT
             .replace("__URL__", JSONObject.quote(url))
             .replace("__TOKEN__", JSONObject.quote(token))
@@ -242,17 +248,42 @@ class AmazonPhotoWebViewController(
         return runCatching { JSONTokener(result).nextValue() as? String }.getOrNull()
     }
 
+    private class BlobTransfer(val file: File) {
+        val output = file.outputStream().buffered()
+    }
+
+    /**
+     * blobは巨大になりうるため、data URLに変換せずチャンク単位で受け取りファイルへ書き込む。
+     * JavascriptInterfaceはバックグラウンドスレッドで呼ばれる。
+     */
     private inner class JsBridge {
         @JavascriptInterface
-        fun onBlobData(token: String?, dataUrl: String?) {
-            mainHandler.post {
-                if (token == null || !pendingBlobTokens.remove(token)) return@post
-                // data: URL以外はネットワークアクセスにつながるため受け付けない
-                if (dataUrl.isNullOrEmpty() || !dataUrl.startsWith("data:")) {
-                    listener.onImageNotFound()
-                } else {
-                    listener.onImageLongPressed(dataUrl, webView.url, userAgent)
-                }
+        fun onBlobChunk(token: String?, base64: String?): Boolean {
+            val transfer = token?.let { blobTransfers[it] } ?: return false
+            return try {
+                transfer.output.write(Base64.decode(base64.orEmpty(), Base64.DEFAULT))
+                true
+            } catch (_: Throwable) {
+                finishBlob(token, success = false)
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun onBlobEnd(token: String?, success: Boolean) {
+            if (token != null) finishBlob(token, success)
+        }
+    }
+
+    private fun finishBlob(token: String, success: Boolean) {
+        val transfer = blobTransfers.remove(token) ?: return
+        runCatching { transfer.output.close() }
+        mainHandler.post {
+            if (success && transfer.file.length() > 0) {
+                listener.onImageLongPressed(Uri.fromFile(transfer.file).toString(), webView.url, userAgent)
+            } else {
+                transfer.file.delete()
+                listener.onImageNotFound()
             }
         }
     }
@@ -328,11 +359,28 @@ class AmazonPhotoWebViewController(
 
         private val FETCH_BLOB_SCRIPT = """
             (function(url, token) {
+              var CHUNK = 512 * 1024;
+              function toBase64(buffer) {
+                var bytes = new Uint8Array(buffer);
+                var binary = '';
+                for (var i = 0; i < bytes.length; i += 0x8000) {
+                  binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+                }
+                return btoa(binary);
+              }
               fetch(url).then(function(r) { return r.blob(); }).then(function(blob) {
-                var reader = new FileReader();
-                reader.onloadend = function() { $BRIDGE_NAME.onBlobData(token, reader.result); };
-                reader.readAsDataURL(blob);
-              }).catch(function() { $BRIDGE_NAME.onBlobData(token, null); });
+                var offset = 0;
+                function next() {
+                  if (offset >= blob.size) { $BRIDGE_NAME.onBlobEnd(token, true); return; }
+                  var end = Math.min(offset + CHUNK, blob.size);
+                  return blob.slice(offset, end).arrayBuffer().then(function(buffer) {
+                    if (!$BRIDGE_NAME.onBlobChunk(token, toBase64(buffer))) return;
+                    offset = end;
+                    return next();
+                  });
+                }
+                return next();
+              }).catch(function() { $BRIDGE_NAME.onBlobEnd(token, false); });
             })(__URL__, __TOKEN__);
         """.trimIndent()
     }

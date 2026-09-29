@@ -13,6 +13,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
@@ -28,7 +29,7 @@ data class DownloadedImage(
 class UnsupportedMimeTypeException(val mimeType: String) : IOException("Unsupported mime type: $mimeType")
 
 class ImageDownloader(context: Context) {
-    private val dir = File(context.cacheDir, "picked")
+    private val dir = File(context.cacheDir, DIR_NAME)
 
     /** 候補URLを順に試し、最初に画像が取得できたものを返す */
     suspend fun download(
@@ -105,6 +106,13 @@ class ImageDownloader(context: Context) {
 
     /** URL(http(s)またはdata:)の内容をファイルへ書き込み、Content-Typeを返す */
     private fun fetchToFile(url: String, userAgent: String, referer: String?, file: File): String? {
+        if (url.startsWith("file:")) {
+            // WebViewのblobを書き出したファイル。キャッシュディレクトリ内のもののみ受け付ける
+            val source = File(URI(url)).canonicalFile
+            if (source.parentFile != dir.canonicalFile) throw IOException("Unsupported file: $url")
+            source.copyTo(file, overwrite = true)
+            return null
+        }
         if (url.startsWith("data:")) {
             return file.outputStream().buffered().use { writeDataUrl(url, it) }
         }
@@ -150,12 +158,20 @@ class ImageDownloader(context: Context) {
         throw IOException("Too many redirects")
     }
 
+    /** WebViewのblobを書き出した一時ファイルを削除する */
+    fun deleteLocalSource(url: String) {
+        if (!url.startsWith("file:")) return
+        val source = runCatching { File(URI(url)).canonicalFile }.getOrNull() ?: return
+        if (source.parentFile == dir.canonicalFile) source.delete()
+    }
+
     fun cleanupOldFiles(maxAgeMillis: Long = 24L * 60 * 60 * 1000) {
         val threshold = System.currentTimeMillis() - maxAgeMillis
         dir.listFiles()?.filter { it.lastModified() < threshold }?.forEach { it.delete() }
     }
 
     companion object {
+        const val DIR_NAME = "picked"
         private const val MAX_REDIRECTS = 10
         private const val HEADER_SIZE = 32
         private const val BASE64_CHUNK_SIZE = 4 * 16 * 1024

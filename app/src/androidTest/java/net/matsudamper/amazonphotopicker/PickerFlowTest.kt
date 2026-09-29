@@ -58,6 +58,19 @@ class PickerFlowTest {
                       <div style="width:100vw;height:100vh;background-image:url('/blue.png');background-size:cover"></div>
                     </body></html>
                 """.trimIndent().toByteArray()),
+                // blob: URLで表示されているページ
+                "/blob.html" to ("text/html" to """
+                    <html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+                    <body style="margin:0">
+                      <img id="img" style="width:100vw;height:100vh;object-fit:cover">
+                      <script>
+                        fetch('/green.png').then(function(r) { return r.blob(); }).then(function(b) {
+                          document.getElementById('img').src = URL.createObjectURL(b);
+                        });
+                      </script>
+                    </body></html>
+                """.trimIndent().toByteArray()),
+                "/green.png" to ("image/png" to createPng(Color.GREEN, 50, 20)),
                 "/red.png" to ("image/png" to createPng(Color.RED, 64, 48)),
                 "/blue.png" to ("image/png" to createPng(Color.BLUE, 40, 30)),
             ),
@@ -115,6 +128,22 @@ class PickerFlowTest {
         val bitmap = decode(clipData.getItemAt(0).uri)
         assertEquals(40, bitmap.width)
         assertEquals(Color.BLUE, bitmap.getPixel(5, 5))
+    }
+
+    @Test
+    fun selectBlobImage() {
+        val scenario = launch(page = "/blob.html", allowMultiple = false)
+
+        longPressAndSelect()
+        composeRule.waitUntilAtLeastOneExists(hasText("選択中 1件"), TIMEOUT)
+        composeRule.onNodeWithText("完了").performClick()
+
+        val result = scenario.result
+        assertEquals(Activity.RESULT_OK, result.resultCode)
+        val bitmap = decode(requireNotNull(result.resultData?.data))
+        assertEquals(50, bitmap.width)
+        assertEquals(20, bitmap.height)
+        assertEquals(Color.GREEN, bitmap.getPixel(5, 5))
     }
 
     private fun launch(page: String, allowMultiple: Boolean): ActivityScenario<MainActivity> {

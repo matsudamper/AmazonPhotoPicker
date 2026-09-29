@@ -54,7 +54,8 @@ jobs:
       - name: Determine release version
         id: version
         run: |
-          VERSION="$(TZ=Asia/Tokyo date +%Y-%m-%d_%H-%M)"
+          # 同じ分に複数回pushされてもタグが重複しないよう、コミットの短縮SHAを付ける
+          VERSION="$(TZ=Asia/Tokyo date +%Y-%m-%d_%H-%M)_${GITHUB_SHA:0:7}"
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
