@@ -4,8 +4,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// CI では Secrets から復元した共通のデバッグ keystore で署名し、上書きインストールできるようにする
-val ciDebugKeystoreFile = System.getenv("DEBUG_KEYSTORE_PATH")?.let { file(it) }
+// CI では Secrets から復元した共通のデバッグ keystore で署名し、上書きインストールできるようにする。
+// ローカルでは環境変数が残っていても常にローカルの debug keystore を使う
+val isCi = System.getenv("CI") == "true"
+val ciDebugKeystoreFile = System.getenv("DEBUG_KEYSTORE_PATH")?.takeIf { isCi }?.let { file(it) }
 val useCiDebugKeystore = ciDebugKeystoreFile != null && ciDebugKeystoreFile.exists() && ciDebugKeystoreFile.length() > 0
 
 android {
