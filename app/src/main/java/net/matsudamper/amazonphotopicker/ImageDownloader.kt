@@ -1,6 +1,8 @@
 package net.matsudamper.amazonphotopicker
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Base64
 import android.webkit.CookieManager
 import android.webkit.MimeTypeMap
@@ -12,6 +14,7 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 data class DownloadedImage(
     val file: File,
@@ -21,6 +24,8 @@ data class DownloadedImage(
 /**
  * WebViewのCookieを使って画像をダウンロードし、キャッシュディレクトリに保存する。
  */
+class UnsupportedMimeTypeException(val mimeType: String) : IOException("Unsupported mime type: $mimeType")
+
 class ImageDownloader(context: Context) {
     private val dir = File(context.cacheDir, "picked")
 
@@ -29,11 +34,21 @@ class ImageDownloader(context: Context) {
         candidates: List<String>,
         userAgent: String,
         referer: String?,
+        acceptedMimeTypes: List<String> = emptyList(),
     ): DownloadedImage = withContext(Dispatchers.IO) {
         var lastError: Throwable? = null
         for (url in candidates) {
             try {
-                return@withContext downloadSingle(url, userAgent, referer)
+                val image = downloadSingle(url, userAgent, referer)
+                if (!MimeTypeMatcher.matches(image.mimeType, acceptedMimeTypes)) {
+                    // 元画像がHEICでもサムネイルならJPEGの場合があるため、次の候補を試す
+                    image.file.delete()
+                    lastError = UnsupportedMimeTypeException(image.mimeType)
+                    continue
+                }
+                return@withContext image
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Throwable) {
                 lastError = e
             }
@@ -41,13 +56,35 @@ class ImageDownloader(context: Context) {
         throw lastError ?: IOException("No candidate")
     }
 
-    suspend fun fetchBytes(url: String, userAgent: String, referer: String?): Pair<ByteArray, String?> =
+    /** プレビュー用に縮小したBitmapを取得する。大きな画像でもメモリに全体を載せないようファイル経由でデコードする */
+    suspend fun loadPreview(url: String, userAgent: String, referer: String?, maxSize: Int): Bitmap? =
         withContext(Dispatchers.IO) {
             if (url.startsWith("data:")) {
-                return@withContext decodeDataUrl(url)
+                val (bytes, _) = decodeDataUrl(url)
+                return@withContext decodeSampled(maxSize) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) }
             }
-            request(url, userAgent, referer) { input, contentType -> input.readBytes() to contentType }
+            dir.mkdirs()
+            val tempFile = File(dir, "preview-${UUID.randomUUID()}.tmp")
+            try {
+                request(url, userAgent, referer) { input, _ ->
+                    tempFile.outputStream().use { input.copyTo(it) }
+                }
+                decodeSampled(maxSize) { BitmapFactory.decodeFile(tempFile.path, it) }
+            } finally {
+                tempFile.delete()
+            }
         }
+
+    private fun decodeSampled(maxSize: Int, decode: (BitmapFactory.Options) -> Bitmap?): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        decode(bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= maxSize || bounds.outHeight / (sample * 2) >= maxSize) {
+            sample *= 2
+        }
+        return decode(BitmapFactory.Options().apply { inSampleSize = sample })
+    }
 
     suspend fun saveBytes(bytes: ByteArray, contentType: String?): DownloadedImage = withContext(Dispatchers.IO) {
         val mimeType = resolveImageMimeType(bytes, contentType)

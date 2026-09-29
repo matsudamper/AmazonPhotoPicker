@@ -2,7 +2,6 @@ package net.matsudamper.amazonphotopicker
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -12,7 +11,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
@@ -64,8 +62,7 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(pending = PendingImage(url = url, pageUrl = pageUrl, userAgent = userAgent)) }
         previewJob = viewModelScope.launch {
             val bitmap = try {
-                val (bytes, _) = downloader.fetchBytes(url, userAgent, pageUrl)
-                withContext(Dispatchers.Default) { decodeSampled(bytes, 1024) }
+                downloader.loadPreview(url, userAgent, pageUrl, maxSize = 1024)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Throwable) {
@@ -105,16 +102,7 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(downloadingCount = it.downloadingCount + 1) }
         viewModelScope.launch {
             try {
-                val image = downloader.download(candidates, userAgent, referer)
-                if (!MimeTypeMatcher.matches(image.mimeType, acceptedMimeTypes)) {
-                    image.file.delete()
-                    _uiState.update {
-                        it.copy(
-                            message = "要求された形式(${acceptedMimeTypes.joinToString()})ではないため選択できません: ${image.mimeType}",
-                        )
-                    }
-                    return@launch
-                }
+                val image = downloader.download(candidates, userAgent, referer, acceptedMimeTypes)
                 if (singleSelection && sequence != downloadSequence) {
                     // より新しい画像が確定されているため、この結果は破棄する
                     image.file.delete()
@@ -130,6 +118,10 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
                 )
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: UnsupportedMimeTypeException) {
+                _uiState.update {
+                    it.copy(message = "要求された形式(${acceptedMimeTypes.joinToString()})ではないため選択できません: ${e.mimeType}")
+                }
             } catch (e: Throwable) {
                 _uiState.update { it.copy(message = "画像の取得に失敗しました: ${e.message}") }
             } finally {
@@ -170,16 +162,5 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun consumeMessage() {
         _uiState.update { it.copy(message = null) }
-    }
-
-    private fun decodeSampled(bytes: ByteArray, maxSize: Int): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sample = 1
-        while (bounds.outWidth / (sample * 2) >= maxSize || bounds.outHeight / (sample * 2) >= maxSize) {
-            sample *= 2
-        }
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 }

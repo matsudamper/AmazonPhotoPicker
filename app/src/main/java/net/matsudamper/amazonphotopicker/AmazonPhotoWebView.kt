@@ -15,6 +15,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.util.UUID
 
 /**
  * Amazon PhotosのWebViewを保持し、画像の長押しを検出する。
@@ -34,6 +35,7 @@ class AmazonPhotoWebViewController(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val mobileUserAgent: String
     private val desktopUserAgent: String
+    private val pendingBlobTokens = mutableSetOf<String>()
     private var lastTouchX = 0f
     private var lastTouchY = 0f
 
@@ -176,7 +178,12 @@ class AmazonPhotoWebViewController(
     }
 
     private fun fetchBlob(url: String) {
-        val script = FETCH_BLOB_SCRIPT.replace("__URL__", JSONObject.quote(url))
+        // ページ内の任意のスクリプトからブリッジを呼ばれても無視できるよう、要求ごとのトークンで照合する
+        val token = UUID.randomUUID().toString()
+        pendingBlobTokens += token
+        val script = FETCH_BLOB_SCRIPT
+            .replace("__URL__", JSONObject.quote(url))
+            .replace("__TOKEN__", JSONObject.quote(token))
         webView.evaluateJavascript(script, null)
     }
 
@@ -187,9 +194,11 @@ class AmazonPhotoWebViewController(
 
     private inner class JsBridge {
         @JavascriptInterface
-        fun onBlobData(dataUrl: String?) {
+        fun onBlobData(token: String?, dataUrl: String?) {
             mainHandler.post {
-                if (dataUrl.isNullOrEmpty()) {
+                if (token == null || !pendingBlobTokens.remove(token)) return@post
+                // data: URL以外はネットワークアクセスにつながるため受け付けない
+                if (dataUrl.isNullOrEmpty() || !dataUrl.startsWith("data:")) {
                     listener.onImageNotFound()
                 } else {
                     listener.onImageLongPressed(dataUrl, webView.url, userAgent)
@@ -247,13 +256,13 @@ class AmazonPhotoWebViewController(
         """.trimIndent()
 
         private val FETCH_BLOB_SCRIPT = """
-            (function(url) {
+            (function(url, token) {
               fetch(url).then(function(r) { return r.blob(); }).then(function(blob) {
                 var reader = new FileReader();
-                reader.onloadend = function() { $BRIDGE_NAME.onBlobData(reader.result); };
+                reader.onloadend = function() { $BRIDGE_NAME.onBlobData(token, reader.result); };
                 reader.readAsDataURL(blob);
-              }).catch(function() { $BRIDGE_NAME.onBlobData(null); });
-            })(__URL__);
+              }).catch(function() { $BRIDGE_NAME.onBlobData(token, null); });
+            })(__URL__, __TOKEN__);
         """.trimIndent()
     }
 }
