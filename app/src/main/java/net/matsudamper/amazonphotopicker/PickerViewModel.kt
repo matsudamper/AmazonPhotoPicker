@@ -47,6 +47,12 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
     /** trueなら1枚のみ選択可能 */
     var singleSelection: Boolean = false
 
+    /** 呼び出し元が要求したMIMEタイプ。空なら制限なし */
+    var acceptedMimeTypes: List<String> = emptyList()
+
+    /** 単一選択時に、後から確定した画像を優先するための連番 */
+    private var downloadSequence = 0
+
     private var previewJob: Job? = null
 
     init {
@@ -95,10 +101,25 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun download(sourceUrl: String, candidates: List<String>, userAgent: String, referer: String?) {
+        val sequence = ++downloadSequence
         _uiState.update { it.copy(downloadingCount = it.downloadingCount + 1) }
         viewModelScope.launch {
             try {
                 val image = downloader.download(candidates, userAgent, referer)
+                if (!MimeTypeMatcher.matches(image.mimeType, acceptedMimeTypes)) {
+                    image.file.delete()
+                    _uiState.update {
+                        it.copy(
+                            message = "要求された形式(${acceptedMimeTypes.joinToString()})ではないため選択できません: ${image.mimeType}",
+                        )
+                    }
+                    return@launch
+                }
+                if (singleSelection && sequence != downloadSequence) {
+                    // より新しい画像が確定されているため、この結果は破棄する
+                    image.file.delete()
+                    return@launch
+                }
                 addSelected(
                     SelectedImage(
                         id = UUID.randomUUID().toString(),

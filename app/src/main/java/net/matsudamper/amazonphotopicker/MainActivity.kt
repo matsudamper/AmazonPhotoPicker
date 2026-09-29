@@ -24,6 +24,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         viewModel.singleSelection = isPickerMode && !intent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+        viewModel.acceptedMimeTypes = if (isPickerMode) acceptedMimeTypes(intent) else emptyList()
 
         setContent {
             PickerTheme {
@@ -39,6 +40,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun acceptedMimeTypes(intent: Intent): List<String> {
+        val extra = intent.getStringArrayExtra(Intent.EXTRA_MIME_TYPES)?.filterNotNull().orEmpty()
+        return extra.ifEmpty { listOfNotNull(intent.type) }
     }
 
     private fun finishWith(images: List<SelectedImage>) {

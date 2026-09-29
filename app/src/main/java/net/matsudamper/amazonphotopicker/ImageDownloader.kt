@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -45,7 +46,7 @@ class ImageDownloader(context: Context) {
             if (url.startsWith("data:")) {
                 return@withContext decodeDataUrl(url)
             }
-            request(url, userAgent, referer)
+            request(url, userAgent, referer) { input, contentType -> input.readBytes() to contentType }
         }
 
     suspend fun saveBytes(bytes: ByteArray, contentType: String?): DownloadedImage = withContext(Dispatchers.IO) {
@@ -59,11 +60,40 @@ class ImageDownloader(context: Context) {
     }
 
     private suspend fun downloadSingle(url: String, userAgent: String, referer: String?): DownloadedImage {
-        val (bytes, contentType) = fetchBytes(url, userAgent, referer)
-        return saveBytes(bytes, contentType)
+        if (url.startsWith("data:")) {
+            val (bytes, contentType) = decodeDataUrl(url)
+            return saveBytes(bytes, contentType)
+        }
+        // 元画像は大きいため、メモリに載せずファイルへ直接書き込む
+        dir.mkdirs()
+        val tempFile = File(dir, "${UUID.randomUUID()}.tmp")
+        try {
+            val contentType = request(url, userAgent, referer) { input, contentType ->
+                tempFile.outputStream().use { input.copyTo(it) }
+                contentType
+            }
+            val header = tempFile.inputStream().use { input ->
+                val buffer = ByteArray(HEADER_SIZE)
+                val read = input.read(buffer).coerceAtLeast(0)
+                buffer.copyOf(read)
+            }
+            val mimeType = resolveImageMimeType(header, contentType)
+                ?: throw IOException("画像ではありません (${contentType ?: "unknown"})")
+            val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "img"
+            val file = File(dir, tempFile.nameWithoutExtension + ".$ext")
+            if (!tempFile.renameTo(file)) throw IOException("Failed to rename file")
+            return DownloadedImage(file = file, mimeType = mimeType)
+        } finally {
+            tempFile.delete()
+        }
     }
 
-    private fun request(startUrl: String, userAgent: String, referer: String?): Pair<ByteArray, String?> {
+    private fun <T> request(
+        startUrl: String,
+        userAgent: String,
+        referer: String?,
+        consumer: (InputStream, String?) -> T,
+    ): T {
         var url = startUrl
         repeat(MAX_REDIRECTS) {
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -86,8 +116,7 @@ class ImageDownloader(context: Context) {
                 if (code !in 200..299) {
                     throw IOException("HTTP $code: $url")
                 }
-                val bytes = connection.inputStream.use { it.readBytes() }
-                return bytes to connection.contentType
+                return connection.inputStream.use { consumer(it, connection.contentType) }
             } finally {
                 connection.disconnect()
             }
@@ -102,6 +131,7 @@ class ImageDownloader(context: Context) {
 
     companion object {
         private const val MAX_REDIRECTS = 10
+        private const val HEADER_SIZE = 32
 
         fun decodeDataUrl(url: String): Pair<ByteArray, String?> {
             val header = url.substringAfter("data:").substringBefore(",")
