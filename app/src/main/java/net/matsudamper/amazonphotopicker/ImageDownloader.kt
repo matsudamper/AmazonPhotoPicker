@@ -110,9 +110,31 @@ class ImageDownloader(context: Context) {
             val bytes = if (header.endsWith(";base64")) {
                 Base64.decode(body, Base64.DEFAULT)
             } else {
-                java.net.URLDecoder.decode(body, "UTF-8").toByteArray()
+                percentDecode(body)
             }
             return bytes to mime
+        }
+
+        /** `+`を保持したまま、%XXをバイト列として直接デコードする */
+        private fun percentDecode(value: String): ByteArray {
+            val out = java.io.ByteArrayOutputStream(value.length)
+            var i = 0
+            while (i < value.length) {
+                val c = value[i]
+                val hex = if (c == '%' && i + 2 < value.length) {
+                    value.substring(i + 1, i + 3).toIntOrNull(16)
+                } else {
+                    null
+                }
+                if (hex != null) {
+                    out.write(hex)
+                    i += 3
+                } else {
+                    out.write(c.toString().toByteArray(Charsets.UTF_8))
+                    i++
+                }
+            }
+            return out.toByteArray()
         }
 
         fun resolveImageMimeType(bytes: ByteArray, contentType: String?): String? {
