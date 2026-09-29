@@ -108,10 +108,12 @@ class ImageDownloader(context: Context) {
     private fun fetchToFile(url: String, userAgent: String, referer: String?, file: File): String? {
         if (url.startsWith("file:")) {
             // WebViewのblobを書き出したファイル。キャッシュディレクトリ内のもののみ受け付ける
-            val source = File(URI(url)).canonicalFile
+            val uri = URI(url)
+            val source = File(uri.path).canonicalFile
             if (source.parentFile != dir.canonicalFile) throw IOException("Unsupported file: $url")
             source.copyTo(file, overwrite = true)
-            return null
+            // フラグメントにblobのMIMEタイプが入っている
+            return uri.fragment
         }
         if (url.startsWith("data:")) {
             return file.outputStream().buffered().use { writeDataUrl(url, it) }
@@ -161,7 +163,7 @@ class ImageDownloader(context: Context) {
     /** WebViewのblobを書き出した一時ファイルを削除する */
     fun deleteLocalSource(url: String) {
         if (!url.startsWith("file:")) return
-        val source = runCatching { File(URI(url)).canonicalFile }.getOrNull() ?: return
+        val source = runCatching { File(URI(url).path).canonicalFile }.getOrNull() ?: return
         if (source.parentFile == dir.canonicalFile) source.delete()
     }
 

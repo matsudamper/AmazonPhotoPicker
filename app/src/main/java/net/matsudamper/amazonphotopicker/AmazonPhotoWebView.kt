@@ -131,6 +131,8 @@ class AmazonPhotoWebViewController(
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                // ページが切り替わると転送中のJSは止まるため破棄する
+                cancelBlobTransfers()
                 notifyNavigation()
             }
 
@@ -194,6 +196,16 @@ class AmazonPhotoWebViewController(
     fun destroy() {
         webView.stopLoading()
         webView.destroy()
+        cancelBlobTransfers()
+    }
+
+    /** 完了しなかったblob転送のストリームを閉じ、途中のファイルを削除する */
+    private fun cancelBlobTransfers() {
+        blobTransfers.keys.toList().forEach { token ->
+            val transfer = blobTransfers.remove(token) ?: return@forEach
+            runCatching { transfer.output.close() }
+            transfer.file.delete()
+        }
     }
 
     private fun updateInnerScrolled(x: Float, y: Float) {
@@ -270,17 +282,21 @@ class AmazonPhotoWebViewController(
         }
 
         @JavascriptInterface
-        fun onBlobEnd(token: String?, success: Boolean) {
-            if (token != null) finishBlob(token, success)
+        fun onBlobEnd(token: String?, success: Boolean, mimeType: String?) {
+            if (token != null) finishBlob(token, success, mimeType)
         }
     }
 
-    private fun finishBlob(token: String, success: Boolean) {
+    private fun finishBlob(token: String, success: Boolean, mimeType: String? = null) {
         val transfer = blobTransfers.remove(token) ?: return
         runCatching { transfer.output.close() }
         mainHandler.post {
             if (success && transfer.file.length() > 0) {
-                listener.onImageLongPressed(Uri.fromFile(transfer.file).toString(), webView.url, userAgent)
+                // blobのMIMEタイプは判定に使えるようURLのフラグメントで渡す
+                val uri = Uri.fromFile(transfer.file).buildUpon()
+                    .apply { if (!mimeType.isNullOrEmpty()) fragment(mimeType) }
+                    .build()
+                listener.onImageLongPressed(uri.toString(), webView.url, userAgent)
             } else {
                 transfer.file.delete()
                 listener.onImageNotFound()
@@ -371,7 +387,7 @@ class AmazonPhotoWebViewController(
               fetch(url).then(function(r) { return r.blob(); }).then(function(blob) {
                 var offset = 0;
                 function next() {
-                  if (offset >= blob.size) { $BRIDGE_NAME.onBlobEnd(token, true); return; }
+                  if (offset >= blob.size) { $BRIDGE_NAME.onBlobEnd(token, true, blob.type || null); return; }
                   var end = Math.min(offset + CHUNK, blob.size);
                   return blob.slice(offset, end).arrayBuffer().then(function(buffer) {
                     if (!$BRIDGE_NAME.onBlobChunk(token, toBase64(buffer))) return;
@@ -380,7 +396,7 @@ class AmazonPhotoWebViewController(
                   });
                 }
                 return next();
-              }).catch(function() { $BRIDGE_NAME.onBlobEnd(token, false); });
+              }).catch(function() { $BRIDGE_NAME.onBlobEnd(token, false, null); });
             })(__URL__, __TOKEN__);
         """.trimIndent()
     }
