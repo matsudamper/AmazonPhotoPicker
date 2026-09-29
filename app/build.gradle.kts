@@ -4,6 +4,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// CI では Secrets から復元した共通のデバッグ keystore で署名し、上書きインストールできるようにする
+val ciDebugKeystoreFile = System.getenv("DEBUG_KEYSTORE_PATH")?.let { file(it) }
+val useCiDebugKeystore = ciDebugKeystoreFile != null && ciDebugKeystoreFile.exists() && ciDebugKeystoreFile.length() > 0
+
 android {
     namespace = "net.matsudamper.amazonphotopicker"
     compileSdk = 36
@@ -18,11 +22,32 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (useCiDebugKeystore) {
+            create("debugCi") {
+                storeFile = ciDebugKeystoreFile
+                storePassword = System.getenv("DEBUG_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("DEBUG_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("DEBUG_KEY_PASSWORD") ?: "android"
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (useCiDebugKeystore) {
+                signingConfig = signingConfigs.getByName("debugCi")
+            }
+        }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (useCiDebugKeystore) {
+                signingConfigs.getByName("debugCi")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {

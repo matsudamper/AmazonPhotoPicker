@@ -1,0 +1,222 @@
+name: PR Android Build
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Decode debug keystore
+        shell: bash
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          # Secret 未設定の場合は既定の debug 署名でビルドする
+          if [ -n "${DEBUG_KEYSTORE_BASE64}" ]; then
+            echo "${DEBUG_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/debug.keystore"
+          fi
+
+      - name: Build debug APK
+        env:
+          DEBUG_KEYSTORE_PATH: ${{ runner.temp }}/debug.keystore
+        run: ./gradlew :app:assembleDebug --console=plain
+
+      - name: Rename APK with branch and short hash
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # GITHUB_SHA はマージコミットのため、PR 上のコミットと一致する head の SHA を使う
+          SHORT_SHA="${HEAD_SHA:0:7}"
+          SAFE_REPO="${REPOSITORY##*/}"
+          SAFE_BRANCH="${BRANCH_NAME//\//-}"
+          APK_NAME="app-${SAFE_REPO}-${SAFE_BRANCH}-${SHORT_SHA}.apk"
+          mv app/build/outputs/apk/debug/app-debug.apk \
+             "app/build/outputs/apk/debug/${APK_NAME}"
+          echo "APK_NAME=${APK_NAME}" >> "$GITHUB_ENV"
+          echo "APK_PATH=app/build/outputs/apk/debug/${APK_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload debug APK to GitHub Artifacts
+        id: upload_apk
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.APK_NAME }}
+          path: ${{ env.APK_PATH }}
+
+      - name: Compress APK for S3 upload
+        run: |
+          xz -0 -c "${APK_PATH}" > "${APK_PATH}.xz"
+          echo "S3_APK_PATH=${APK_PATH}.xz" >> "$GITHUB_ENV"
+
+      - name: Upload APK to S3
+        id: upload_s3
+        uses: matsudamper/actions/upload-matsudamper-s3@6f7068834e08294360d6e5987869a5f50c924c66 # v1.0.1
+        continue-on-error: true
+        with:
+          file_path: ${{ env.S3_APK_PATH }}
+
+      - name: Generate and Upload GitHub QR code
+        id: upload_github_qr
+        env:
+          ARTIFACT_URL: ${{ steps.upload_apk.outputs.artifact-url }}
+        run: |
+          pip install "qrcode[pil]" --quiet
+          python3 -c "import qrcode, sys; qrcode.make(sys.argv[1]).save('qrcode-github.png')" "${ARTIFACT_URL}"
+
+      - name: Upload GitHub QR artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        id: github_qr_artifact
+        with:
+          name: apk-qr-code-github
+          path: qrcode-github.png
+          archive: false
+
+      - name: Generate and Upload S3 QR code
+        if: steps.upload_s3.outputs.url != ''
+        id: upload_s3_qr
+        env:
+          S3_URL: ${{ steps.upload_s3.outputs.url }}
+        run: |
+          python3 -c "import qrcode, sys; qrcode.make(sys.argv[1]).save('qrcode-s3.png')" "${S3_URL}"
+
+      - name: Upload S3 QR artifact
+        if: steps.upload_s3.outputs.url != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        id: s3_qr_artifact
+        with:
+          name: apk-qr-code-s3
+          path: qrcode-s3.png
+          archive: false
+
+      - name: Comment APK download URLs
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: apk-download
+          recreate: true
+          message: |
+            ✅ **Debug APK is ready!**
+
+            | Storage | 圧縮方式 | Download Link | QR Code |
+            | :--- | :--- | :--- | :--- |
+            | 🐙 GitHub Artifacts | zstd | [Download](${{ steps.upload_apk.outputs.artifact-url }}) | [View](${{ steps.github_qr_artifact.outputs.artifact-url }}) |
+            ${{ steps.upload_s3.outputs.url && format('| ☁️ S3 | xz | [Download]({0}) | [View]({1}) |', steps.upload_s3.outputs.url, steps.s3_qr_artifact.outputs.artifact-url) || format('| ☁️ S3 | - | ⚠️ アップロード失敗 ([run]({0}/{1}/actions/runs/{2})) | - |', github.server_url, github.repository, github.run_id) }}
+
+            ---
+            *Artifact Name: `${{ env.APK_NAME }}`*
+            *Commit: [`${{ github.event.pull_request.head.sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.pull_request.head.sha }})*
+
+      - name: Run Android Lint
+        run: ./gradlew :app:lintDebug --console=plain
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-lint-report
+          path: app/build/reports/lint-results-debug.html
+
+  unit-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Run unit tests
+        run: ./gradlew test --console=plain
+
+      - name: Upload unit test report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-test-report
+          path: |
+            **/build/reports/tests/testDebugUnitTest/
+            **/build/test-results/testDebugUnitTest/
+
+  android-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm",GROUP="kvm",MODE="0666",OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Build test APKs
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --console=plain
+
+      - name: Run Android Instrumentation Tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            ./gradlew :app:connectedDebugAndroidTest --console=plain || (adb pull /sdcard/Download/picker-screenshots screenshots || true; exit 1)
+            adb pull /sdcard/Download/picker-screenshots screenshots || true
+
+      - name: Upload Android test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-androidtest-report
+          path: |
+            screenshots/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+          if-no-files-found: ignore
