@@ -14,4 +14,4 @@ Amazon Photos (https://www.amazon.co.jp/photos/) の画像を、他アプリの�
 ## 配布
 - PR: デバッグAPKをビルドし、GitHub Artifacts / S3 のダウンロードリンクとQRコードをPRにコメントする
 - main へのpush: debug / release APK をビルドし、GitHub Release（`YYYY-MM-DD_HH-MM`）として公開する
-- Secret `DEBUG_KEYSTORE_BASE64`（base64化したkeystore）を設定すると、CIのAPKを共通の鍵で署名する（上書きインストール可能）。未設定時は既定のdebug鍵で署名する
+- 配布するAPKはすべて Secret `DEBUG_KEYSTORE_BASE64`（base64化したkeystore）の鍵で署名する（上書きインストール可能）。未設定の場合はCIが失敗する
