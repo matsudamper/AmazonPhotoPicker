@@ -229,7 +229,11 @@ class AmazonPhotoWebViewController(
                 if (!el || !el.tagName) return null;
                 var tag = el.tagName.toUpperCase();
                 if (tag === 'IMG') return el.currentSrc || el.src || null;
-                if (tag === 'IMAGE') return el.href && (el.href.baseVal || el.href) || null;
+                if (tag === 'IMAGE') {
+                  var href = el.href && el.href.baseVal || el.getAttribute('href') || el.getAttribute('xlink:href');
+                  // SVGのhrefは相対パスのまま返るため絶対URLに解決する
+                  return href ? new URL(href, document.baseURI).href : null;
+                }
                 var bg = window.getComputedStyle(el).backgroundImage;
                 if (bg && bg !== 'none') {
                   var m = bg.match(/url\(["']?(.*?)["']?\)/);

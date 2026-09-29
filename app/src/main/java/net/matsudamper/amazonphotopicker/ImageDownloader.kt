@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -59,16 +60,10 @@ class ImageDownloader(context: Context) {
     /** プレビュー用に縮小したBitmapを取得する。大きな画像でもメモリに全体を載せないようファイル経由でデコードする */
     suspend fun loadPreview(url: String, userAgent: String, referer: String?, maxSize: Int): Bitmap? =
         withContext(Dispatchers.IO) {
-            if (url.startsWith("data:")) {
-                val (bytes, _) = decodeDataUrl(url)
-                return@withContext decodeSampled(maxSize) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) }
-            }
             dir.mkdirs()
             val tempFile = File(dir, "preview-${UUID.randomUUID()}.tmp")
             try {
-                request(url, userAgent, referer) { input, _ ->
-                    tempFile.outputStream().use { input.copyTo(it) }
-                }
+                fetchToFile(url, userAgent, referer, tempFile)
                 decodeSampled(maxSize) { BitmapFactory.decodeFile(tempFile.path, it) }
             } finally {
                 tempFile.delete()
@@ -86,29 +81,12 @@ class ImageDownloader(context: Context) {
         return decode(BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
-    suspend fun saveBytes(bytes: ByteArray, contentType: String?): DownloadedImage = withContext(Dispatchers.IO) {
-        val mimeType = resolveImageMimeType(bytes, contentType)
-            ?: throw IOException("画像ではありません (${contentType ?: "unknown"})")
-        dir.mkdirs()
-        val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "img"
-        val file = File(dir, "${UUID.randomUUID()}.$ext")
-        file.writeBytes(bytes)
-        DownloadedImage(file = file, mimeType = mimeType)
-    }
-
-    private suspend fun downloadSingle(url: String, userAgent: String, referer: String?): DownloadedImage {
-        if (url.startsWith("data:")) {
-            val (bytes, contentType) = decodeDataUrl(url)
-            return saveBytes(bytes, contentType)
-        }
+    private fun downloadSingle(url: String, userAgent: String, referer: String?): DownloadedImage {
         // 元画像は大きいため、メモリに載せずファイルへ直接書き込む
         dir.mkdirs()
         val tempFile = File(dir, "${UUID.randomUUID()}.tmp")
         try {
-            val contentType = request(url, userAgent, referer) { input, contentType ->
-                tempFile.outputStream().use { input.copyTo(it) }
-                contentType
-            }
+            val contentType = fetchToFile(url, userAgent, referer, tempFile)
             val header = tempFile.inputStream().use { input ->
                 val buffer = ByteArray(HEADER_SIZE)
                 val read = input.read(buffer).coerceAtLeast(0)
@@ -122,6 +100,17 @@ class ImageDownloader(context: Context) {
             return DownloadedImage(file = file, mimeType = mimeType)
         } finally {
             tempFile.delete()
+        }
+    }
+
+    /** URL(http(s)またはdata:)の内容をファイルへ書き込み、Content-Typeを返す */
+    private fun fetchToFile(url: String, userAgent: String, referer: String?, file: File): String? {
+        if (url.startsWith("data:")) {
+            return file.outputStream().buffered().use { writeDataUrl(url, it) }
+        }
+        return request(url, userAgent, referer) { input, contentType ->
+            file.outputStream().use { input.copyTo(it) }
+            contentType
         }
     }
 
@@ -169,23 +158,42 @@ class ImageDownloader(context: Context) {
     companion object {
         private const val MAX_REDIRECTS = 10
         private const val HEADER_SIZE = 32
+        private const val BASE64_CHUNK_SIZE = 4 * 16 * 1024
 
-        fun decodeDataUrl(url: String): Pair<ByteArray, String?> {
-            val header = url.substringAfter("data:").substringBefore(",")
-            val body = url.substringAfter(",")
+        /** data: URLを少しずつデコードして書き込み、MIMEタイプを返す */
+        fun writeDataUrl(url: String, out: OutputStream): String? {
+            val commaIndex = url.indexOf(',')
+            if (commaIndex < 0) throw IOException("Invalid data URL")
+            val header = url.substring("data:".length, commaIndex)
             val mime = header.substringBefore(";").ifEmpty { null }
-            val bytes = if (header.endsWith(";base64")) {
-                Base64.decode(body, Base64.DEFAULT)
+            if (header.endsWith(";base64")) {
+                writeBase64(url, commaIndex + 1, out)
             } else {
-                percentDecode(body)
+                writePercentDecoded(url, commaIndex + 1, out)
             }
-            return bytes to mime
+            return mime
+        }
+
+        private fun writeBase64(value: String, start: Int, out: OutputStream) {
+            val chunk = StringBuilder(BASE64_CHUNK_SIZE)
+            for (i in start until value.length) {
+                val c = value[i]
+                if (c.isWhitespace()) continue
+                chunk.append(c)
+                // 4文字単位で区切ればbase64は独立してデコードできる
+                if (chunk.length == BASE64_CHUNK_SIZE) {
+                    out.write(Base64.decode(chunk.toString(), Base64.DEFAULT))
+                    chunk.setLength(0)
+                }
+            }
+            if (chunk.isNotEmpty()) {
+                out.write(Base64.decode(chunk.toString(), Base64.DEFAULT))
+            }
         }
 
         /** `+`を保持したまま、%XXをバイト列として直接デコードする */
-        private fun percentDecode(value: String): ByteArray {
-            val out = java.io.ByteArrayOutputStream(value.length)
-            var i = 0
+        private fun writePercentDecoded(value: String, start: Int, out: OutputStream) {
+            var i = start
             while (i < value.length) {
                 val c = value[i]
                 val hex = if (c == '%' && i + 2 < value.length) {
@@ -201,7 +209,6 @@ class ImageDownloader(context: Context) {
                     i++
                 }
             }
-            return out.toByteArray()
         }
 
         fun resolveImageMimeType(bytes: ByteArray, contentType: String?): String? {
