@@ -53,10 +53,21 @@ jobs:
         run: ./gradlew :app:assembleDebug --console=plain
 
       - name: Verify APK signature
+        env:
+          DEBUG_KEYSTORE_PATH: ${{ runner.temp }}/debug.keystore
         run: |
+          # 別の鍵で署名されたAPKが配布されないよう、keystoreの証明書と一致するか確認する
+          EXPECTED="$(keytool -list -v -keystore "${DEBUG_KEYSTORE_PATH}" -storepass android -alias androiddebugkey \
+            | grep -E '^\s*SHA256:' | head -1 | sed 's/.*SHA256: *//' | tr -d ':' | tr 'A-F' 'a-f')"
+          echo "expected SHA-256: ${EXPECTED}"
           APKSIGNER="$(ls -d "${ANDROID_HOME}"/build-tools/* | sort -V | tail -1)/apksigner"
           for apk in app/build/outputs/apk/debug/app-debug.apk; do
-            "${APKSIGNER}" verify --print-certs "${apk}" | grep -E "certificate (DN|SHA-256 digest)"
+            ACTUAL="$("${APKSIGNER}" verify --print-certs "${apk}" | grep 'certificate SHA-256 digest' | head -1 | sed 's/.*: *//')"
+            echo "${apk}: ${ACTUAL}"
+            if [ -z "${EXPECTED}" ] || [ "${EXPECTED}" != "${ACTUAL}" ]; then
+              echo "::error::${apk} が DEBUG_KEYSTORE_BASE64 の鍵で署名されていません"
+              exit 1
+            fi
           done
 
       - name: Rename APK with branch and short hash
