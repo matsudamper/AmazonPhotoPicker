@@ -119,7 +119,8 @@ class AmazonPhotoWebViewController(
                 return when (val decision = NavigationPolicy.decide(request.url.toString())) {
                     NavigationPolicy.Decision.Allow -> false
                     is NavigationPolicy.Decision.Redirect -> {
-                        view.loadUrl(decision.url)
+                        // iframeからの遷移でトップレベルのページが置き換わらないよう、メインフレームのみ従う
+                        if (request.isForMainFrame) view.loadUrl(decision.url)
                         true
                     }
                     NavigationPolicy.Decision.Block -> {
