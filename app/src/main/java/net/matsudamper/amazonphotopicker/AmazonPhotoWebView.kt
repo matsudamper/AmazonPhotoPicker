@@ -10,9 +10,13 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.util.UUID
@@ -29,6 +33,7 @@ class AmazonPhotoWebViewController(
         fun onImageLongPressed(url: String, pageUrl: String?, userAgent: String)
         fun onDownloadRequested(url: String, mimeType: String?, pageUrl: String?, userAgent: String)
         fun onImageNotFound()
+        fun onExternalNavigationBlocked()
         fun onNavigationStateChanged(canGoBack: Boolean, progress: Int)
     }
 
@@ -48,6 +53,22 @@ class AmazonPhotoWebViewController(
             ViewGroup.LayoutParams.MATCH_PARENT,
         )
     }
+
+    /** 上端で下に引っ張るとページを再読み込みする */
+    val rootView: SwipeRefreshLayout = SwipeRefreshLayout(context).apply {
+        layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        )
+        addView(webView)
+        setOnRefreshListener { webView.reload() }
+        // Amazon Photosはページ内の要素がスクロールするため、WebView自体のスクロール位置だけでは判定できない
+        setOnChildScrollUpCallback { _, _ -> webView.canScrollVertically(-1) || innerScrolled }
+    }
+
+    /** タッチ位置のスクロール可能な要素が上端にない場合true */
+    @Volatile
+    private var innerScrolled = true
 
     val userAgent: String get() = webView.settings.userAgentString
 
@@ -79,14 +100,37 @@ class AmazonPhotoWebViewController(
             mediaPlaybackRequiresUserGesture = true
             userAgentString = mobileUserAgent
         }
+        // Passkey(WebAuthn)を使えるようにする。ブラウザとして任意のオリジンで認証を行う
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION)) {
+            WebSettingsCompat.setWebAuthenticationSupport(
+                webView.settings,
+                WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_FOR_BROWSER,
+            )
+        }
         webView.addJavascriptInterface(JsBridge(), BRIDGE_NAME)
 
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                return when (val decision = NavigationPolicy.decide(request.url.toString())) {
+                    NavigationPolicy.Decision.Allow -> false
+                    is NavigationPolicy.Decision.Redirect -> {
+                        view.loadUrl(decision.url)
+                        true
+                    }
+                    NavigationPolicy.Decision.Block -> {
+                        // アプリ起動・ストア誘導などはWebViewで開けないため無視する
+                        if (request.hasGesture()) listener.onExternalNavigationBlocked()
+                        true
+                    }
+                }
+            }
+
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 notifyNavigation()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
+                rootView.isRefreshing = false
                 notifyNavigation()
             }
 
@@ -110,6 +154,7 @@ class AmazonPhotoWebViewController(
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                 lastTouchX = event.x
                 lastTouchY = event.y
+                updateInnerScrolled(event.x, event.y)
             }
             false
         }
@@ -130,10 +175,6 @@ class AmazonPhotoWebViewController(
         if (webView.canGoBack()) webView.goBack()
     }
 
-    fun reload() {
-        webView.reload()
-    }
-
     fun goHome() {
         webView.loadUrl(START_URL)
     }
@@ -148,6 +189,15 @@ class AmazonPhotoWebViewController(
     fun destroy() {
         webView.stopLoading()
         webView.destroy()
+    }
+
+    private fun updateInnerScrolled(x: Float, y: Float) {
+        // 判定結果が返るまでは更新しない側に倒す
+        innerScrolled = true
+        val script = INNER_SCROLLED_SCRIPT
+            .replace("__X__", x.toString())
+            .replace("__Y__", y.toString())
+        webView.evaluateJavascript(script) { result -> innerScrolled = result != "false" }
     }
 
     private fun notifyNavigation() {
@@ -256,6 +306,23 @@ class AmazonPhotoWebViewController(
                 }
               }
               return null;
+            })(__X__, __Y__);
+        """.trimIndent()
+
+        /** タッチ位置から祖先をたどり、上方向にスクロールできる要素があるか調べる */
+        private val INNER_SCROLLED_SCRIPT = """
+            (function(px, py) {
+              var vv = window.visualViewport;
+              var scale = window.devicePixelRatio * (vv ? vv.scale : 1);
+              var x = px / scale + (vv ? vv.offsetLeft : 0);
+              var y = py / scale + (vv ? vv.offsetTop : 0);
+              var el = document.elementFromPoint(x, y);
+              while (el && el !== document.documentElement) {
+                if (el.scrollTop > 0) return true;
+                el = el.parentElement;
+              }
+              var root = document.scrollingElement || document.documentElement;
+              return !!(root && root.scrollTop > 0);
             })(__X__, __Y__);
         """.trimIndent()
 

@@ -124,6 +124,10 @@ fun PickerScreen(
                     viewModel.showMessage("長押しした位置に画像が見つかりませんでした")
                 }
 
+                override fun onExternalNavigationBlocked() {
+                    viewModel.showMessage("アプリへの移動はこのアプリ内では開けません")
+                }
+
                 override fun onNavigationStateChanged(canGoBack: Boolean, progress: Int) {
                     onNavigationChanged(canGoBack, progress)
                 }
@@ -157,7 +161,6 @@ fun PickerScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = { controller.reload() }) { Text("更新") }
                     Box {
                         TextButton(onClick = { showMenu = true }) { Text("⋮") }
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -228,7 +231,7 @@ fun PickerScreen(
                 )
             }
             AndroidView(
-                factory = { controller.webView },
+                factory = { controller.rootView },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
