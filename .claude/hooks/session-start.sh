@@ -19,8 +19,8 @@ if not proxy_url:
 parsed   = urllib.parse.urlparse(proxy_url)
 host     = parsed.hostname
 port     = str(parsed.port)
-user     = parsed.username or ''
-password = parsed.password or ''
+user     = urllib.parse.unquote(parsed.username or '')
+password = urllib.parse.unquote(parsed.password or '')
 
 gradle_home = os.path.expanduser('~/.gradle')
 os.makedirs(gradle_home, exist_ok=True)
@@ -70,58 +70,6 @@ def download(url, dest_path, opener):
 
 proxy_handler = urllib.request.ProxyHandler({'https': proxy_url, 'http': proxy_url})
 opener = urllib.request.build_opener(proxy_handler)
-
-# ── プロキシ認証用 Java Agent ─────────────────────────────────────────────────
-# sdkmanager 等の JVM ツールでプロキシ認証を有効にするための Java agent
-# Gradle init スクリプトの Authenticator と同じパターン
-agent_dir = os.path.join(gradle_home, 'proxy-auth-agent')
-agent_jar = os.path.join(agent_dir, 'proxy-auth-agent.jar')
-
-if not os.path.exists(agent_jar):
-    os.makedirs(agent_dir, exist_ok=True)
-    agent_java = os.path.join(agent_dir, 'ProxyAuthAgent.java')
-    with open(agent_java, 'w') as f:
-        f.write("""import java.lang.instrument.Instrumentation;
-import java.net.Authenticator;
-import java.net.PasswordAuthentication;
-
-public class ProxyAuthAgent {
-    public static void premain(String args, Instrumentation inst) {
-        String proxyUser = System.getProperty("https.proxyUser",
-                           System.getProperty("http.proxyUser", ""));
-        String proxyPass = System.getProperty("https.proxyPassword",
-                           System.getProperty("http.proxyPassword", ""));
-        if (!proxyUser.isEmpty() && !proxyPass.isEmpty()) {
-            Authenticator.setDefault(new Authenticator() {
-                @Override
-                protected PasswordAuthentication getPasswordAuthentication() {
-                    if (getRequestorType() == RequestorType.PROXY) {
-                        return new PasswordAuthentication(proxyUser, proxyPass.toCharArray());
-                    }
-                    return null;
-                }
-            });
-        }
-    }
-}
-""")
-    manifest_path = os.path.join(agent_dir, 'MANIFEST.MF')
-    with open(manifest_path, 'w') as f:
-        f.write('Premain-Class: ProxyAuthAgent\n')
-    java_home_tmp = os.environ.get('JAVA_HOME', '/usr/lib/jvm/java-21-openjdk-amd64')
-    javac = os.path.join(java_home_tmp, 'bin', 'javac')
-    jar_cmd = os.path.join(java_home_tmp, 'bin', 'jar')
-    r1 = subprocess.run([javac, agent_java], cwd=agent_dir, capture_output=True, text=True)
-    if r1.returncode == 0:
-        r2 = subprocess.run([jar_cmd, 'cfm', agent_jar, 'MANIFEST.MF',
-                            'ProxyAuthAgent.class', 'ProxyAuthAgent$1.class'],
-                           cwd=agent_dir, capture_output=True, text=True)
-        if r2.returncode == 0:
-            print(f"Proxy auth Java agent created: {agent_jar}")
-        else:
-            print(f"Failed to create agent JAR: {r2.stderr.strip()}")
-    else:
-        print(f"Failed to compile ProxyAuthAgent: {r1.stderr.strip()}")
 
 # ── Gradle デーモン JVM の truststore にプロキシ CA を追加 ────────────
 # HTTPS プロキシ (TLS 検査) の CA を JDK truststore に追加する
@@ -186,21 +134,32 @@ enable_basic_auth_tunneling(java_home, 'JDK')
 
 # ── ~/.gradle/gradle.properties にプロキシ設定を書き込む ─────────────────────
 def write_gradle_properties():
-    props = (
-        f"systemProp.https.proxyHost={host}\n"
-        f"systemProp.https.proxyPort={port}\n"
-        f"systemProp.https.proxyUser={user}\n"
-        f"systemProp.https.proxyPassword={password}\n"
-        f"systemProp.http.proxyHost={host}\n"
-        f"systemProp.http.proxyPort={port}\n"
-        f"systemProp.http.proxyUser={user}\n"
-        f"systemProp.http.proxyPassword={password}\n"
-        f"systemProp.https.nonProxyHosts=localhost|127.0.0.1\n"
-        f"systemProp.http.nonProxyHosts=localhost|127.0.0.1\n"
-        f"systemProp.jdk.http.auth.tunneling.disabledSchemes=\n"
-    )
-    with open(os.path.join(gradle_home, 'gradle.properties'), 'w') as f:
-        f.write(props)
+    managed = {
+        'systemProp.https.proxyHost': host,
+        'systemProp.https.proxyPort': port,
+        'systemProp.https.proxyUser': user,
+        'systemProp.https.proxyPassword': password,
+        'systemProp.http.proxyHost': host,
+        'systemProp.http.proxyPort': port,
+        'systemProp.http.proxyUser': user,
+        'systemProp.http.proxyPassword': password,
+        'systemProp.https.nonProxyHosts': 'localhost|127.0.0.1',
+        'systemProp.http.nonProxyHosts': 'localhost|127.0.0.1',
+        'systemProp.jdk.http.auth.tunneling.disabledSchemes': '',
+    }
+    props_path = os.path.join(gradle_home, 'gradle.properties')
+    kept = []
+    if os.path.exists(props_path):
+        with open(props_path) as f:
+            for line in f.read().splitlines():
+                key = re.split(r'[=:\s]', line.strip(), maxsplit=1)[0]
+                if key not in managed:
+                    kept.append(line)
+    with open(props_path, 'w') as f:
+        for line in kept:
+            f.write(line + "\n")
+        for key, value in managed.items():
+            f.write(f"{key}={value}\n")
     print(f"gradle.properties written (proxy={host}:{port})")
 
 # ── Gradle distribution の事前ダウンロード ────────────────────────────────────
