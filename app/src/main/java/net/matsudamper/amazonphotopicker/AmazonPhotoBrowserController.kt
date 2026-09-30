@@ -49,6 +49,8 @@ class AmazonPhotoBrowserController(
     private val blobWriteExecutor = Executors.newSingleThreadExecutor()
     private var currentUrl: String? = null
     private var lastSessionState: GeckoSession.SessionState? = null
+    private var isStarted = false
+    private var reopenOnStart = false
     private var initialLoadRequested = false
     private var canGoBack = false
     private var progress = 0
@@ -133,6 +135,18 @@ class AmazonPhotoBrowserController(
             GeckoSessionSettings.VIEWPORT_MODE_MOBILE
         }
         session.reload()
+    }
+
+    fun onStart() {
+        isStarted = true
+        if (reopenOnStart) {
+            reopenOnStart = false
+            reopenSession()
+        }
+    }
+
+    fun onStop() {
+        isStarted = false
     }
 
     fun destroy() {
@@ -222,12 +236,12 @@ class AmazonPhotoBrowserController(
         override fun onKill(session: GeckoSession) {
             // バックグラウンド中にメモリ不足でコンテンツプロセスが kill されると、セッションが閉じて画面が空になる
             Log.w(TAG, "コンテンツプロセスが kill されたためセッションを復元")
-            reopenSession()
+            reopenSessionWhenStarted()
         }
 
         override fun onCrash(session: GeckoSession) {
             Log.w(TAG, "コンテンツプロセスがクラッシュしたためセッションを復元")
-            reopenSession()
+            reopenSessionWhenStarted()
         }
 
         override fun onContextMenu(
@@ -247,6 +261,15 @@ class AmazonPhotoBrowserController(
             ) {
                 listener.onImageLongPressed(srcUri, currentUrl)
             }
+        }
+    }
+
+    /** バックグラウンド中に開き直すと解放されたメモリを再確保して再び kill されるため、表示されるまで待つ */
+    private fun reopenSessionWhenStarted() {
+        if (isStarted) {
+            reopenSession()
+        } else {
+            reopenOnStart = true
         }
     }
 
