@@ -1,10 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# Only run in Claude Code Web remote environment
-if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
+# フックとして呼ばれた場合は Claude Code Web のリモート環境でのみ動かす。
+# 複数リポジトリのセッションではフックが読まれないため、環境のセットアップスクリプトから
+# CLAUDE_PROJECT_DIR なしで直接呼ばれても動くようにする
+if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
+
+export PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 
 echo "Configuring Gradle proxy settings..."
 
@@ -195,7 +199,7 @@ write_gradle_properties()
 # ── Android SDK セットアップ ──────────────────────────────────────────────────
 # sdkmanager のセットアップのみ（パッケージはビルド時に AGP が自動ダウンロード）
 
-project_dir = os.environ.get('CLAUDE_PROJECT_DIR', os.getcwd())
+project_dir = os.environ['PROJECT_DIR']
 android_home = os.path.expanduser('~/android-sdk')
 local_props = os.path.join(project_dir, 'local.properties')
 
