@@ -54,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,7 +69,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import org.mozilla.geckoview.WebResponse
 
@@ -88,13 +88,13 @@ fun PickerTheme(content: @Composable () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PickerScreen(
-    viewModel: PickerViewModel,
+    uiState: PickerUiState,
     isPickerMode: Boolean,
     startUrl: String,
-    onFinish: (List<SelectedImage>) -> Unit,
+    onFinish: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val listener by rememberUpdatedState(uiState.listener)
     val context = LocalContext.current
     var canGoBack by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
@@ -114,19 +114,19 @@ fun PickerScreen(
             context = context,
             listener = object : AmazonPhotoBrowserController.Listener {
                 override fun onImageLongPressed(url: String, pageUrl: String?) {
-                    viewModel.onImageLongPressed(url, pageUrl)
+                    listener.onImageLongPressed(url, pageUrl)
                 }
 
                 override fun onDownloadResponse(response: WebResponse) {
-                    viewModel.onDownloadResponse(response)
+                    listener.onDownloadResponse(response)
                 }
 
                 override fun onImageNotFound() {
-                    viewModel.showMessage("長押しした位置に画像が見つかりませんでした")
+                    listener.onImageNotFound()
                 }
 
                 override fun onExternalNavigationBlocked() {
-                    viewModel.showMessage("アプリへの移動はこのアプリ内では開けません")
+                    listener.onExternalNavigationBlocked()
                 }
 
                 override fun onNavigationStateChanged(canGoBack: Boolean, progress: Int) {
@@ -143,9 +143,11 @@ fun PickerScreen(
         controller.setDesktopMode(desktopMode)
     }
     LaunchedEffect(uiState.message) {
-        val message = uiState.message ?: return@LaunchedEffect
-        viewModel.consumeMessage()
-        snackbarHostState.showSnackbar(message)
+        val message = uiState.message
+        if (message != null) {
+            listener.onMessageShown()
+            snackbarHostState.showSnackbar(message)
+        }
     }
 
     BackHandler(enabled = canGoBack) {
@@ -194,17 +196,17 @@ fun PickerScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(onClick = { showSelected = true }) {
-                        Text("選択中 ${uiState.selected.size}件")
+                        Text("選択中 ${uiState.selectedImages.size}件")
                     }
                     Text(
-                        text = if (uiState.selected.isEmpty()) "画像を長押しで選択" else "",
+                        text = if (uiState.selectedImages.isEmpty()) "画像を長押しで選択" else "",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center,
                     )
                     Button(
-                        onClick = { onFinish(uiState.selected) },
-                        enabled = uiState.selected.isNotEmpty() && uiState.downloadingCount == 0,
+                        onClick = onFinish,
+                        enabled = uiState.selectedImages.isNotEmpty() && uiState.downloadingCount == 0,
                     ) {
                         Text(if (isPickerMode) "完了" else "共有")
                     }
@@ -240,12 +242,13 @@ fun PickerScreen(
         }
     }
 
-    uiState.pending?.let { pending ->
+    val pendingImage = uiState.pendingImage
+    if (pendingImage != null) {
         PendingImageDialog(
-            pending = pending,
-            singleSelection = viewModel.singleSelection,
-            onConfirm = { viewModel.confirmPending() },
-            onDismiss = { viewModel.dismissPending() },
+            pending = pendingImage,
+            singleSelection = uiState.singleSelection,
+            onConfirm = { listener.onConfirmPendingImage() },
+            onDismiss = { listener.onDismissPendingImage() },
         )
     }
 
@@ -255,9 +258,8 @@ fun PickerScreen(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
             SelectedImagesSheet(
-                images = uiState.selected,
-                onRemove = { viewModel.remove(it.id) },
-                onClear = { viewModel.clear() },
+                images = uiState.selectedImages,
+                onClear = { listener.onClearSelectedImages() },
             )
         }
     }
@@ -265,7 +267,7 @@ fun PickerScreen(
 
 @Composable
 private fun PendingImageDialog(
-    pending: PendingImage,
+    pending: PendingImageUiState,
     singleSelection: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
@@ -312,11 +314,10 @@ private fun PendingImageDialog(
 
 @Composable
 private fun SelectedImagesSheet(
-    images: List<SelectedImage>,
-    onRemove: (SelectedImage) -> Unit,
+    images: List<SelectedImageUiState>,
     onClear: () -> Unit,
 ) {
-    var previewImage by remember { mutableStateOf<SelectedImage?>(null) }
+    var previewImage by remember { mutableStateOf<SelectedImageUiState?>(null) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -353,7 +354,7 @@ private fun SelectedImagesSheet(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 contentPadding = PaddingValues(8.dp),
             ) {
-                items(images, key = { it.id }) { image ->
+                items(images, key = { it.file.path }) { image ->
                     Box(
                         modifier = Modifier
                             .aspectRatio(1f)
@@ -374,7 +375,7 @@ private fun SelectedImagesSheet(
                                 .padding(4.dp)
                                 .size(32.dp)
                                 .clip(CircleShape)
-                                .clickable { onRemove(image) },
+                                .clickable { image.listener.onRemove() },
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text("✕", color = Color.White)
@@ -417,7 +418,7 @@ private fun SelectedImagesSheet(
                     ) { Text("閉じる", color = Color.White) }
                     Button(
                         onClick = {
-                            onRemove(image)
+                            image.listener.onRemove()
                             previewImage = null
                         },
                         modifier = Modifier.weight(1f),

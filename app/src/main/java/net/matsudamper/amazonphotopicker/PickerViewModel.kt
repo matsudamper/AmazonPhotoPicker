@@ -7,8 +7,10 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.GeckoWebExecutor
@@ -24,33 +26,93 @@ data class SelectedImage(
     val sourceUrl: String,
 )
 
-data class PendingImage(
-    val url: String,
-    val pageUrl: String?,
-    val preview: Bitmap? = null,
-    val previewFailed: Boolean = false,
-)
-
-data class PickerUiState(
-    val selected: List<SelectedImage> = emptyList(),
-    val pending: PendingImage? = null,
-    val downloadingCount: Int = 0,
-    val message: String? = null,
-)
-
 class PickerViewModel(application: Application) : AndroidViewModel(application) {
+    private data class PendingImage(
+        val url: String,
+        val pageUrl: String?,
+        val preview: Bitmap?,
+        val previewFailed: Boolean,
+    )
+
+    private data class ViewModelState(
+        val selected: List<SelectedImage>,
+        val pending: PendingImage?,
+        val downloadingCount: Int,
+        val message: String?,
+        val singleSelection: Boolean,
+        val acceptedMimeTypes: List<String>,
+    )
+
     private val downloader = ImageDownloader(
         context = application,
         webExecutor = GeckoWebExecutor(GeckoRuntimeHolder.get(application)),
     )
-    private val _uiState = MutableStateFlow(PickerUiState())
-    val uiState: StateFlow<PickerUiState> = _uiState.asStateFlow()
 
-    /** trueなら1枚のみ選択可能 */
-    var singleSelection: Boolean = false
+    private val viewModelState = MutableStateFlow(
+        ViewModelState(
+            selected = listOf(),
+            pending = null,
+            downloadingCount = 0,
+            message = null,
+            singleSelection = false,
+            acceptedMimeTypes = listOf(),
+        ),
+    )
 
-    /** 呼び出し元が要求したMIMEタイプ。空なら制限なし */
-    var acceptedMimeTypes: List<String> = emptyList()
+    private val listener = object : PickerUiState.Listener {
+        override fun onImageLongPressed(url: String, pageUrl: String?) {
+            startPending(url, pageUrl)
+        }
+
+        override fun onDownloadResponse(response: WebResponse) {
+            val body = response.body ?: return
+            val acceptedMimeTypes = viewModelState.value.acceptedMimeTypes
+            download(sourceUrl = response.uri) {
+                downloader.saveResponse(body, response.contentType(), acceptedMimeTypes)
+            }
+        }
+
+        override fun onImageNotFound() {
+            showMessage("長押しした位置に画像が見つかりませんでした")
+        }
+
+        override fun onExternalNavigationBlocked() {
+            showMessage("アプリへの移動はこのアプリ内では開けません")
+        }
+
+        override fun onConfirmPendingImage() {
+            val pending = viewModelState.value.pending ?: return
+            val acceptedMimeTypes = viewModelState.value.acceptedMimeTypes
+            clearPending()
+            download(sourceUrl = pending.url) {
+                downloader.download(
+                    candidates = ImageUrlResolver.candidates(pending.url, pending.pageUrl),
+                    referer = pending.pageUrl,
+                    acceptedMimeTypes = acceptedMimeTypes,
+                )
+            }
+        }
+
+        override fun onDismissPendingImage() {
+            viewModelState.value.pending?.let { downloader.deleteLocalSource(it.url) }
+            clearPending()
+        }
+
+        override fun onClearSelectedImages() {
+            viewModelState.update { state ->
+                state.selected.forEach { it.file.delete() }
+                state.copy(selected = listOf())
+            }
+        }
+
+        override fun onMessageShown() {
+            viewModelState.update { it.copy(message = null) }
+        }
+    }
+
+    val uiState: StateFlow<PickerUiState> = viewModelState
+        .map { it.toUiState() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, viewModelState.value.toUiState())
 
     /** 単一選択時に、後から確定した画像を優先するための連番 */
     private var downloadSequence = 0
@@ -61,10 +123,46 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) { downloader.cleanupOldFiles() }
     }
 
-    fun onImageLongPressed(url: String, pageUrl: String?) {
+    /**
+     * 呼び出し元の要求を設定する。
+     * @param acceptedMimeTypes 空なら制限なし
+     */
+    fun setRequest(singleSelection: Boolean, acceptedMimeTypes: List<String>) {
+        viewModelState.update {
+            it.copy(singleSelection = singleSelection, acceptedMimeTypes = acceptedMimeTypes)
+        }
+    }
+
+    fun selectedImages(): List<SelectedImage> = viewModelState.value.selected
+
+    private fun ViewModelState.toUiState(): PickerUiState {
+        return PickerUiState(
+            selectedImages = selected.map { image ->
+                SelectedImageUiState(
+                    file = image.file,
+                    listener = object : SelectedImageUiState.Listener {
+                        override fun onRemove() {
+                            remove(image.id)
+                        }
+                    },
+                )
+            },
+            pendingImage = pending?.let {
+                PendingImageUiState(preview = it.preview, previewFailed = it.previewFailed)
+            },
+            downloadingCount = downloadingCount,
+            message = message,
+            singleSelection = singleSelection,
+            listener = listener,
+        )
+    }
+
+    private fun startPending(url: String, pageUrl: String?) {
         previewJob?.cancel()
-        _uiState.value.pending?.let { downloader.deleteLocalSource(it.url) }
-        _uiState.update { it.copy(pending = PendingImage(url = url, pageUrl = pageUrl)) }
+        viewModelState.value.pending?.let { downloader.deleteLocalSource(it.url) }
+        viewModelState.update {
+            it.copy(pending = PendingImage(url = url, pageUrl = pageUrl, preview = null, previewFailed = false))
+        }
         previewJob = viewModelScope.launch {
             val bitmap = try {
                 downloader.loadPreview(url, pageUrl, maxSize = 1024)
@@ -73,7 +171,7 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
             } catch (_: Throwable) {
                 null
             }
-            _uiState.update { state ->
+            viewModelState.update { state ->
                 val pending = state.pending
                 if (pending?.url != url) return@update state
                 state.copy(pending = pending.copy(preview = bitmap, previewFailed = bitmap == null))
@@ -81,43 +179,18 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun dismissPending() {
-        _uiState.value.pending?.let { downloader.deleteLocalSource(it.url) }
-        clearPending()
-    }
-
     private fun clearPending() {
         previewJob?.cancel()
-        _uiState.update { it.copy(pending = null) }
-    }
-
-    fun confirmPending() {
-        val pending = _uiState.value.pending ?: return
-        clearPending()
-        download(sourceUrl = pending.url) {
-            downloader.download(
-                candidates = ImageUrlResolver.candidates(pending.url, pending.pageUrl),
-                referer = pending.pageUrl,
-                acceptedMimeTypes = acceptedMimeTypes,
-            )
-        }
-    }
-
-    /** ページのダウンロードボタンなどから直接ダウンロードされた場合 */
-    fun onDownloadResponse(response: WebResponse) {
-        val body = response.body ?: return
-        download(sourceUrl = response.uri) {
-            downloader.saveResponse(body, response.contentType(), acceptedMimeTypes)
-        }
+        viewModelState.update { it.copy(pending = null) }
     }
 
     private fun download(sourceUrl: String, obtainImage: suspend () -> DownloadedImage) {
         val sequence = ++downloadSequence
-        _uiState.update { it.copy(downloadingCount = it.downloadingCount + 1) }
+        viewModelState.update { it.copy(downloadingCount = it.downloadingCount + 1) }
         viewModelScope.launch {
             try {
                 val image = obtainImage()
-                if (singleSelection && sequence != downloadSequence) {
+                if (viewModelState.value.singleSelection && sequence != downloadSequence) {
                     // より新しい画像が確定されているため、この結果は破棄する
                     image.file.delete()
                     return@launch
@@ -133,21 +206,20 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: CancellationException) {
                 throw e
             } catch (e: UnsupportedMimeTypeException) {
-                _uiState.update {
-                    it.copy(message = "要求された形式(${acceptedMimeTypes.joinToString()})ではないため選択できません: ${e.mimeType}")
-                }
+                val accepted = viewModelState.value.acceptedMimeTypes.joinToString()
+                showMessage("要求された形式($accepted)ではないため選択できません: ${e.mimeType}")
             } catch (e: Throwable) {
-                _uiState.update { it.copy(message = "画像の取得に失敗しました: ${e.message}") }
+                showMessage("画像の取得に失敗しました: ${e.message}")
             } finally {
                 downloader.deleteLocalSource(sourceUrl)
-                _uiState.update { it.copy(downloadingCount = it.downloadingCount - 1) }
+                viewModelState.update { it.copy(downloadingCount = it.downloadingCount - 1) }
             }
         }
     }
 
     private fun addSelected(image: SelectedImage) {
-        _uiState.update { state ->
-            val newList = if (singleSelection) {
+        viewModelState.update { state ->
+            val newList = if (state.singleSelection) {
                 state.selected.forEach { it.file.delete() }
                 listOf(image)
             } else {
@@ -157,25 +229,14 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun remove(id: String) {
-        _uiState.update { state ->
+    private fun remove(id: String) {
+        viewModelState.update { state ->
             state.selected.find { it.id == id }?.file?.delete()
             state.copy(selected = state.selected.filterNot { it.id == id })
         }
     }
 
-    fun clear() {
-        _uiState.update { state ->
-            state.selected.forEach { it.file.delete() }
-            state.copy(selected = emptyList())
-        }
-    }
-
-    fun showMessage(message: String) {
-        _uiState.update { it.copy(message = message) }
-    }
-
-    fun consumeMessage() {
-        _uiState.update { it.copy(message = null) }
+    private fun showMessage(message: String) {
+        viewModelState.update { it.copy(message = message) }
     }
 }

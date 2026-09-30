@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.FileProvider
 
 class MainActivity : ComponentActivity() {
@@ -23,16 +25,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        viewModel.singleSelection = isPickerMode && !intent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
-        viewModel.acceptedMimeTypes = if (isPickerMode) acceptedMimeTypes(intent) else emptyList()
+        viewModel.setRequest(
+            singleSelection = isPickerMode && !intent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false),
+            acceptedMimeTypes = if (isPickerMode) acceptedMimeTypes(intent) else listOf(),
+        )
 
         setContent {
             PickerTheme {
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 PickerScreen(
-                    viewModel = viewModel,
+                    uiState = uiState,
                     isPickerMode = isPickerMode,
                     startUrl = startUrl,
-                    onFinish = { images -> finishWith(images) },
+                    onFinish = { finishWith(viewModel.selectedImages()) },
                     onCancel = {
                         setResult(RESULT_CANCELED)
                         finish()
