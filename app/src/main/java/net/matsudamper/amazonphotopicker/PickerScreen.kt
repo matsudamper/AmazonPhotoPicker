@@ -430,43 +430,56 @@ private fun SelectedImagesSheet(
             onDismissRequest = { previewImage = null },
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black),
-            ) {
-                val zoomState = rememberZoomState()
-                AsyncImage(
-                    model = image.file,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    onSuccess = { zoomState.setContentSize(it.painter.intrinsicSize) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clipToBounds()
-                        .zoomable(zoomState),
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = { previewImage = null },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("閉じる", color = Color.White) }
-                    Button(
-                        onClick = {
-                            image.listener.onRemove()
-                            previewImage = null
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("削除") }
-                }
-            }
+            SelectedImagePreview(
+                image = image,
+                onClose = { previewImage = null },
+                onRemove = {
+                    image.listener.onRemove()
+                    previewImage = null
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectedImagePreview(
+    image: SelectedImageUiState,
+    onClose: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
+        val zoomState = rememberZoomState()
+        AsyncImage(
+            model = image.file,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            onSuccess = { zoomState.setContentSize(it.painter.intrinsicSize) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clipToBounds()
+                .zoomable(zoomState),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            OutlinedButton(
+                onClick = onClose,
+                modifier = Modifier.weight(1f),
+            ) { Text("閉じる", color = Color.White) }
+            Button(
+                onClick = onRemove,
+                modifier = Modifier.weight(1f),
+            ) { Text("削除") }
         }
     }
 }
@@ -497,6 +510,19 @@ private fun PickerScreenPendingPreview() {
             downloadingCount = 0,
         ),
     )
+}
+
+@Preview
+@Composable
+private fun SelectedImagePreviewPreview() {
+    MaterialTheme {
+        SelectedImagePreview(
+            image = previewUiState(selectedCount = 1, pendingImage = null, downloadingCount = 0)
+                .selectedImages.first(),
+            onClose = {},
+            onRemove = {},
+        )
+    }
 }
 
 @Composable
