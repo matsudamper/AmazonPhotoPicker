@@ -205,7 +205,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            CI_ABI_FILTER=x86_64 ./gradlew :app:connectedDebugAndroidTest --console=plain || (adb pull /sdcard/Download/picker-screenshots screenshots || true; exit 1)
+            CI_ABI_FILTER=x86_64 ./gradlew :app:connectedDebugAndroidTest --console=plain || (adb pull /sdcard/Download/picker-screenshots screenshots || true; .github/scripts/print-android-test-failures.sh; exit 1)
             adb pull /sdcard/Download/picker-screenshots screenshots || true
 
       - name: Upload Android test report
