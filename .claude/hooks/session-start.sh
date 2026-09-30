@@ -18,7 +18,7 @@ if not proxy_url:
 
 parsed   = urllib.parse.urlparse(proxy_url)
 host     = parsed.hostname
-port     = str(parsed.port)
+port     = str(parsed.port or (80 if parsed.scheme == 'http' else 443))
 user     = urllib.parse.unquote(parsed.username or '')
 password = urllib.parse.unquote(parsed.password or '')
 
@@ -133,6 +133,12 @@ import_ca_into_jdk(java_home, 'JDK')
 enable_basic_auth_tunneling(java_home, 'JDK')
 
 # ── ~/.gradle/gradle.properties にプロキシ設定を書き込む ─────────────────────
+def escape_properties_value(value):
+    escaped = value.replace('\\', '\\\\')
+    if escaped.startswith(' '):
+        escaped = '\\' + escaped
+    return escaped
+
 def write_gradle_properties():
     managed = {
         'systemProp.https.proxyHost': host,
@@ -159,7 +165,7 @@ def write_gradle_properties():
         for line in kept:
             f.write(line + "\n")
         for key, value in managed.items():
-            f.write(f"{key}={value}\n")
+            f.write(f"{key}={escape_properties_value(value)}\n")
     print(f"gradle.properties written (proxy={host}:{port})")
 
 # ── Gradle distribution の事前ダウンロード ────────────────────────────────────
