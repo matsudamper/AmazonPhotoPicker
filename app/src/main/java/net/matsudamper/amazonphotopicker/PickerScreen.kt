@@ -60,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -71,6 +72,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
+import net.engawapg.lib.zoomable.rememberZoomState
+import net.engawapg.lib.zoomable.zoomable
 import org.mozilla.geckoview.WebResponse
 import java.io.File
 
@@ -427,39 +430,56 @@ private fun SelectedImagesSheet(
             onDismissRequest = { previewImage = null },
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black),
-            ) {
-                AsyncImage(
-                    model = image.file,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = { previewImage = null },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("閉じる", color = Color.White) }
-                    Button(
-                        onClick = {
-                            image.listener.onRemove()
-                            previewImage = null
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("削除") }
-                }
-            }
+            SelectedImagePreview(
+                image = image,
+                onClose = { previewImage = null },
+                onRemove = {
+                    image.listener.onRemove()
+                    previewImage = null
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectedImagePreview(
+    image: SelectedImageUiState,
+    onClose: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
+        val zoomState = rememberZoomState()
+        AsyncImage(
+            model = image.file,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            onSuccess = { zoomState.setContentSize(it.painter.intrinsicSize) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clipToBounds()
+                .zoomable(zoomState),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            OutlinedButton(
+                onClick = onClose,
+                modifier = Modifier.weight(1f),
+            ) { Text("閉じる", color = Color.White) }
+            Button(
+                onClick = onRemove,
+                modifier = Modifier.weight(1f),
+            ) { Text("削除") }
         }
     }
 }
@@ -490,6 +510,19 @@ private fun PickerScreenPendingPreview() {
             downloadingCount = 0,
         ),
     )
+}
+
+@Preview
+@Composable
+private fun SelectedImagePreviewPreview() {
+    MaterialTheme {
+        SelectedImagePreview(
+            image = previewUiState(selectedCount = 1, pendingImage = null, downloadingCount = 0)
+                .selectedImages.first(),
+            onClose = {},
+            onRemove = {},
+        )
+    }
 }
 
 @Composable
