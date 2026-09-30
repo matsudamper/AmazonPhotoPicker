@@ -60,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -71,6 +72,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
+import net.engawapg.lib.zoomable.rememberZoomState
+import net.engawapg.lib.zoomable.zoomable
 import org.mozilla.geckoview.WebResponse
 import java.io.File
 
@@ -432,13 +435,17 @@ private fun SelectedImagesSheet(
                     .fillMaxSize()
                     .background(Color.Black),
             ) {
+                val zoomState = rememberZoomState()
                 AsyncImage(
                     model = image.file,
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
+                    onSuccess = { zoomState.setContentSize(it.painter.intrinsicSize) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
+                        .weight(1f)
+                        .clipToBounds()
+                        .zoomable(zoomState),
                 )
                 Row(
                     modifier = Modifier
