@@ -5,3 +5,4 @@ local.properties
 *.iml
 .kotlin/
 captures/
+**/src/test/snapshots/images/

@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.paparazzi)
 }
 
 // CI では Secrets から復元した共通のデバッグ keystore で署名し、上書きインストールできるようにする。
@@ -80,6 +81,20 @@ kotlin {
     }
 }
 
+// Paparazzi のスナップショットは通常のユニットテストと分け、Paparazzi のタスク実行時だけ動かす
+tasks.withType<Test>().configureEach {
+    val hasPaparazziTask = gradle.startParameter.taskNames.any {
+        it.lowercase().contains("paparazzi")
+    }
+    useJUnit {
+        if (hasPaparazziTask) {
+            includeCategories("net.matsudamper.amazonphotopicker.PaparazziTestCategory")
+        } else {
+            excludeCategories("net.matsudamper.amazonphotopicker.PaparazziTestCategory")
+        }
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -97,6 +112,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     testImplementation(libs.junit)
+    testImplementation(libs.composable.preview.scanner)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

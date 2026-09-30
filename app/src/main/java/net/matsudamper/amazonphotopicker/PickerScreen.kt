@@ -65,12 +65,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import org.mozilla.geckoview.WebResponse
+import java.io.File
 
 @Composable
 fun PickerTheme(content: @Composable () -> Unit) {
@@ -85,7 +87,6 @@ fun PickerTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = colorScheme, content = content)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PickerScreen(
     uiState: PickerUiState,
@@ -98,10 +99,7 @@ fun PickerScreen(
     val context = LocalContext.current
     var canGoBack by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
-    var showSelected by rememberSaveable { mutableStateOf(false) }
-    var showMenu by remember { mutableStateOf(false) }
     var desktopMode by rememberSaveable { mutableStateOf(false) }
-    val snackbarHostState = remember { SnackbarHostState() }
 
     val onNavigationChanged: (Boolean, Int) -> Unit = remember {
         { back, newProgress ->
@@ -142,16 +140,54 @@ fun PickerScreen(
     LaunchedEffect(desktopMode) {
         controller.setDesktopMode(desktopMode)
     }
+
+    BackHandler(enabled = canGoBack) {
+        controller.goBack()
+    }
+
+    PickerScreenContent(
+        uiState = uiState,
+        isPickerMode = isPickerMode,
+        progress = progress,
+        desktopMode = desktopMode,
+        onDesktopModeChange = { desktopMode = it },
+        onGoHome = { controller.goHome() },
+        onFinish = onFinish,
+        onCancel = onCancel,
+        browser = { modifier ->
+            AndroidView(
+                factory = { controller.rootView },
+                modifier = modifier,
+            )
+        },
+    )
+}
+
+/** GeckoView を差し替えてプレビューできるよう、ブラウザ以外の表示を分ける */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PickerScreenContent(
+    uiState: PickerUiState,
+    isPickerMode: Boolean,
+    progress: Int,
+    desktopMode: Boolean,
+    onDesktopModeChange: (Boolean) -> Unit,
+    onGoHome: () -> Unit,
+    onFinish: () -> Unit,
+    onCancel: () -> Unit,
+    browser: @Composable (Modifier) -> Unit,
+) {
+    val listener by rememberUpdatedState(uiState.listener)
+    var showSelected by rememberSaveable { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
     LaunchedEffect(uiState.message) {
         val message = uiState.message
         if (message != null) {
             listener.onMessageShown()
             snackbarHostState.showSnackbar(message)
         }
-    }
-
-    BackHandler(enabled = canGoBack) {
-        controller.goBack()
     }
 
     Scaffold(
@@ -171,14 +207,14 @@ fun PickerScreen(
                                 text = { Text("Amazon Photosトップへ") },
                                 onClick = {
                                     showMenu = false
-                                    controller.goHome()
+                                    onGoHome()
                                 },
                             )
                             DropdownMenuItem(
                                 text = { Text(if (desktopMode) "✓ PC版表示" else "PC版表示") },
                                 onClick = {
                                     showMenu = false
-                                    desktopMode = !desktopMode
+                                    onDesktopModeChange(!desktopMode)
                                 },
                             )
                         }
@@ -233,9 +269,8 @@ fun PickerScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            AndroidView(
-                factory = { controller.rootView },
-                modifier = Modifier
+            browser(
+                Modifier
                     .fillMaxWidth()
                     .weight(1f),
             )
@@ -427,4 +462,87 @@ private fun SelectedImagesSheet(
             }
         }
     }
+}
+
+@Preview
+@Composable
+private fun PickerScreenEmptyPreview() {
+    PickerScreenPreviewTemplate(
+        uiState = previewUiState(selectedCount = 0, pendingImage = null, downloadingCount = 0),
+    )
+}
+
+@Preview
+@Composable
+private fun PickerScreenSelectedPreview() {
+    PickerScreenPreviewTemplate(
+        uiState = previewUiState(selectedCount = 2, pendingImage = null, downloadingCount = 1),
+    )
+}
+
+@Preview
+@Composable
+private fun PickerScreenPendingPreview() {
+    PickerScreenPreviewTemplate(
+        uiState = previewUiState(
+            selectedCount = 1,
+            pendingImage = PendingImageUiState(preview = null, previewFailed = true),
+            downloadingCount = 0,
+        ),
+    )
+}
+
+@Composable
+private fun PickerScreenPreviewTemplate(uiState: PickerUiState) {
+    MaterialTheme {
+        PickerScreenContent(
+            uiState = uiState,
+            isPickerMode = true,
+            progress = 50,
+            desktopMode = false,
+            onDesktopModeChange = {},
+            onGoHome = {},
+            onFinish = {},
+            onCancel = {},
+            browser = { modifier ->
+                Box(
+                    modifier = modifier.background(Color.LightGray),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("Amazon Photos")
+                }
+            },
+        )
+    }
+}
+
+private fun previewUiState(
+    selectedCount: Int,
+    pendingImage: PendingImageUiState?,
+    downloadingCount: Int,
+): PickerUiState {
+    return PickerUiState(
+        selectedImages = List(selectedCount) { index ->
+            SelectedImageUiState(
+                file = File("preview-$index.jpg"),
+                listener = object : SelectedImageUiState.Listener {
+                    override fun onRemove() = Unit
+                },
+            )
+        },
+        pendingImage = pendingImage,
+        downloadingCount = downloadingCount,
+        message = null,
+        singleSelection = false,
+        listener = object : PickerUiState.Listener {
+            override fun onImageLongPressed(url: String, pageUrl: String?) = Unit
+            override fun onDownloadResponse(response: WebResponse) = Unit
+            override fun onImageNotFound() = Unit
+            override fun onExternalNavigationBlocked() = Unit
+            override fun onConfirmPendingImage() = Unit
+            override fun onDismissPendingImage() = Unit
+            override fun onClearSelectedImages() = Unit
+            override fun onMessageShown() = Unit
+        },
+    )
 }
