@@ -2,5 +2,15 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "/^androidx\\./",
+        "org.mozilla.geckoview:geckoview",
+        "/^io\\.coil-kt\\.coil3:/"
+      ],
+      "automerge": true
+    }
   ]
 }
