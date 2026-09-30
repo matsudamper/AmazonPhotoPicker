@@ -13,6 +13,9 @@
         "http://*/*",
         "https://*/*"
       ],
+      "css": [
+        "hide_upsell.css"
+      ],
       "js": [
         "content.js"
       ],
