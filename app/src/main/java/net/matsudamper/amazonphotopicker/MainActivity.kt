@@ -18,7 +18,7 @@ class MainActivity : ComponentActivity() {
     /** テスト用にデバッグビルドでのみ開始URLを差し替え可能にする */
     private val startUrl: String
         get() = intent?.getStringExtra(EXTRA_START_URL)?.takeIf { BuildConfig.DEBUG }
-            ?: AmazonPhotoWebViewController.START_URL
+            ?: AmazonPhotoBrowserController.START_URL
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

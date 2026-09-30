@@ -157,11 +157,13 @@ class PickerFlowTest {
         return ActivityScenario.launchActivityForResult(intent)
     }
 
-    /** WebViewを長押しし、確認ダイアログで「選択」を押す。ページ読み込み待ちのためリトライする */
+    /** ページを長押しし、確認ダイアログで「選択」を押す。ページ読み込み待ちのためリトライする */
     private fun longPressAndSelect() {
-        val webView = requireNotNull(device.wait(Until.findObject(By.clazz("android.webkit.WebView")), TIMEOUT))
+        val browser = requireNotNull(
+            device.wait(Until.findObject(By.res(context.packageName, "amazon_photo_browser")), TIMEOUT),
+        )
         repeat(10) { attempt ->
-            val bounds = webView.visibleBounds
+            val bounds = browser.visibleBounds
             device.swipe(bounds.centerX(), bounds.centerY(), bounds.centerX(), bounds.centerY(), 150)
             val shown = runCatching {
                 composeRule.waitUntilAtLeastOneExists(hasText("この画像を選択しますか？"), 3_000)

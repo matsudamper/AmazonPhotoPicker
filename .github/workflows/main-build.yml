@@ -22,11 +22,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
@@ -46,11 +46,13 @@ jobs:
       - name: Build debug APK
         env:
           DEBUG_KEYSTORE_PATH: ${{ runner.temp }}/debug.keystore
+          CI_ABI_FILTER: arm64-v8a
         run: ./gradlew :app:assembleDebug --console=plain
 
       - name: Build release APK
         env:
           DEBUG_KEYSTORE_PATH: ${{ runner.temp }}/debug.keystore
+          CI_ABI_FILTER: arm64-v8a
         run: ./gradlew :app:assembleRelease --console=plain
 
       - name: Verify APK signature
@@ -119,6 +121,8 @@ jobs:
           path: ${{ env.RELEASE_APK_PATH }}
 
       - name: Run Android Lint
+        env:
+          CI_ABI_FILTER: arm64-v8a
         run: ./gradlew :app:lintDebug --console=plain
 
       - name: Upload lint report
@@ -143,11 +147,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
@@ -172,11 +176,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
@@ -188,6 +192,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Build test APKs
+        env:
+          CI_ABI_FILTER: x86_64
         run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --console=plain
 
       - name: Run Android Instrumentation Tests
@@ -199,7 +205,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            ./gradlew :app:connectedDebugAndroidTest --console=plain || (adb pull /sdcard/Download/picker-screenshots screenshots || true; exit 1)
+            CI_ABI_FILTER=x86_64 ./gradlew :app:connectedDebugAndroidTest --console=plain || (adb pull /sdcard/Download/picker-screenshots screenshots || true; exit 1)
             adb pull /sdcard/Download/picker-screenshots screenshots || true
 
       - name: Upload Android test report

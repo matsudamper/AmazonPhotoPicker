@@ -4,17 +4,17 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
-import android.webkit.CookieManager
 import android.webkit.MimeTypeMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.mozilla.geckoview.GeckoWebExecutor
+import org.mozilla.geckoview.WebRequest
+import org.mozilla.geckoview.WebResponse
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -23,25 +23,24 @@ data class DownloadedImage(
     val mimeType: String,
 )
 
-/**
- * WebViewのCookieを使って画像をダウンロードし、キャッシュディレクトリに保存する。
- */
 class UnsupportedMimeTypeException(val mimeType: String) : IOException("Unsupported mime type: $mimeType")
 
-class ImageDownloader(context: Context) {
+/**
+ * GeckoView のログイン状態で画像をダウンロードし、キャッシュディレクトリに保存する。
+ */
+class ImageDownloader(context: Context, private val webExecutor: GeckoWebExecutor) {
     private val dir = File(context.cacheDir, DIR_NAME)
 
     /** 候補URLを順に試し、最初に画像が取得できたものを返す */
     suspend fun download(
         candidates: List<String>,
-        userAgent: String,
         referer: String?,
         acceptedMimeTypes: List<String> = emptyList(),
     ): DownloadedImage = withContext(Dispatchers.IO) {
         var lastError: Throwable? = null
         for (url in candidates) {
             try {
-                val image = downloadSingle(url, userAgent, referer)
+                val image = downloadSingle(url, referer)
                 if (!MimeTypeMatcher.matches(image.mimeType, acceptedMimeTypes)) {
                     // 元画像がHEICでもサムネイルならJPEGの場合があるため、次の候補を試す
                     image.file.delete()
@@ -59,12 +58,12 @@ class ImageDownloader(context: Context) {
     }
 
     /** プレビュー用に縮小したBitmapを取得する。大きな画像でもメモリに全体を載せないようファイル経由でデコードする */
-    suspend fun loadPreview(url: String, userAgent: String, referer: String?, maxSize: Int): Bitmap? =
+    suspend fun loadPreview(url: String, referer: String?, maxSize: Int): Bitmap? =
         withContext(Dispatchers.IO) {
             dir.mkdirs()
             val tempFile = File(dir, "preview-${UUID.randomUUID()}.tmp")
             try {
-                fetchToFile(url, userAgent, referer, tempFile)
+                fetchToFile(url, referer, tempFile)
                 decodeSampled(maxSize) { BitmapFactory.decodeFile(tempFile.path, it) }
             } finally {
                 tempFile.delete()
@@ -82,12 +81,35 @@ class ImageDownloader(context: Context) {
         return decode(BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
-    private fun downloadSingle(url: String, userAgent: String, referer: String?): DownloadedImage {
-        // 元画像は大きいため、メモリに載せずファイルへ直接書き込む
+    private fun downloadSingle(url: String, referer: String?): DownloadedImage {
+        return storeAsImage { tempFile -> fetchToFile(url, referer, tempFile) }
+    }
+
+    /** ページのダウンロード操作で GeckoView から渡された内容を保存する */
+    suspend fun saveResponse(
+        body: InputStream,
+        contentType: String?,
+        acceptedMimeTypes: List<String>,
+    ): DownloadedImage = withContext(Dispatchers.IO) {
+        val image = body.use { input ->
+            storeAsImage { tempFile ->
+                tempFile.outputStream().use { input.copyTo(it) }
+                contentType
+            }
+        }
+        if (!MimeTypeMatcher.matches(image.mimeType, acceptedMimeTypes)) {
+            image.file.delete()
+            throw UnsupportedMimeTypeException(image.mimeType)
+        }
+        image
+    }
+
+    /** 元画像は大きいため、メモリに載せずファイルへ直接書き込んでから形式を判定する */
+    private fun storeAsImage(writeTo: (File) -> String?): DownloadedImage {
         dir.mkdirs()
         val tempFile = File(dir, "${UUID.randomUUID()}.tmp")
         try {
-            val contentType = fetchToFile(url, userAgent, referer, tempFile)
+            val contentType = writeTo(tempFile)
             val header = tempFile.inputStream().use { input ->
                 val buffer = ByteArray(HEADER_SIZE)
                 val read = input.read(buffer).coerceAtLeast(0)
@@ -105,9 +127,9 @@ class ImageDownloader(context: Context) {
     }
 
     /** URL(http(s)またはdata:)の内容をファイルへ書き込み、Content-Typeを返す */
-    private fun fetchToFile(url: String, userAgent: String, referer: String?, file: File): String? {
+    private fun fetchToFile(url: String, referer: String?, file: File): String? {
         if (url.startsWith("file:")) {
-            // WebViewのblobを書き出したファイル。キャッシュディレクトリ内のもののみ受け付ける
+            // ページの blob を書き出したファイル。キャッシュディレクトリ内のもののみ受け付ける
             val uri = URI(url)
             val source = File(uri.path).canonicalFile
             if (source.parentFile != dir.canonicalFile) throw IOException("Unsupported file: $url")
@@ -118,49 +140,34 @@ class ImageDownloader(context: Context) {
         if (url.startsWith("data:")) {
             return file.outputStream().buffered().use { writeDataUrl(url, it) }
         }
-        return request(url, userAgent, referer) { input, contentType ->
+        return request(url, referer) { input, contentType ->
             file.outputStream().use { input.copyTo(it) }
             contentType
         }
     }
 
+    /** GeckoView の Cookie を使うため、GeckoView のネットワーク層で取得する */
     private fun <T> request(
-        startUrl: String,
-        userAgent: String,
+        url: String,
         referer: String?,
         consumer: (InputStream, String?) -> T,
     ): T {
-        var url = startUrl
-        repeat(MAX_REDIRECTS) {
-            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-                instanceFollowRedirects = false
-                connectTimeout = 30_000
-                readTimeout = 60_000
-                setRequestProperty("User-Agent", userAgent)
-                setRequestProperty("Accept", "image/*,*/*;q=0.8")
-                if (referer != null) setRequestProperty("Referer", referer)
-                CookieManager.getInstance().getCookie(url)?.let { setRequestProperty("Cookie", it) }
+        val request = WebRequest.Builder(url)
+            .header("Accept", "image/*,*/*;q=0.8")
+            .apply { if (referer != null) referrer(referer) }
+            .build()
+        val response = webExecutor.fetch(request).poll(FETCH_TIMEOUT_MILLIS)
+            ?: throw IOException("No response: $url")
+        val body = response.body ?: throw IOException("Empty body: $url")
+        return body.use {
+            if (response.statusCode !in 200..299) {
+                throw IOException("HTTP ${response.statusCode}: $url")
             }
-            try {
-                val code = connection.responseCode
-                if (code in 300..399) {
-                    val location = connection.getHeaderField("Location")
-                        ?: throw IOException("Redirect without location")
-                    url = URL(URL(url), location).toString()
-                    return@repeat
-                }
-                if (code !in 200..299) {
-                    throw IOException("HTTP $code: $url")
-                }
-                return connection.inputStream.use { consumer(it, connection.contentType) }
-            } finally {
-                connection.disconnect()
-            }
+            consumer(it, response.contentType())
         }
-        throw IOException("Too many redirects")
     }
 
-    /** WebViewのblobを書き出した一時ファイルを削除する */
+    /** ページの blob を書き出した一時ファイルを削除する */
     fun deleteLocalSource(url: String) {
         if (!url.startsWith("file:")) return
         val source = runCatching { File(URI(url).path).canonicalFile }.getOrNull() ?: return
@@ -174,7 +181,7 @@ class ImageDownloader(context: Context) {
 
     companion object {
         const val DIR_NAME = "picked"
-        private const val MAX_REDIRECTS = 10
+        private const val FETCH_TIMEOUT_MILLIS = 60_000L
         private const val HEADER_SIZE = 32
         private const val BASE64_CHUNK_SIZE = 4 * 16 * 1024
 
@@ -251,4 +258,9 @@ class ImageDownloader(context: Context) {
             }
         }
     }
+}
+
+/** GeckoView はヘッダー名の大文字小文字を保持したまま渡すため、大小を区別せずに探す */
+fun WebResponse.contentType(): String? {
+    return headers.entries.firstOrNull { it.key.equals("Content-Type", ignoreCase = true) }?.value
 }

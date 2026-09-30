@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.mozilla.geckoview.GeckoWebExecutor
+import org.mozilla.geckoview.WebResponse
 import java.io.File
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
@@ -25,7 +27,6 @@ data class SelectedImage(
 data class PendingImage(
     val url: String,
     val pageUrl: String?,
-    val userAgent: String,
     val preview: Bitmap? = null,
     val previewFailed: Boolean = false,
 )
@@ -38,7 +39,10 @@ data class PickerUiState(
 )
 
 class PickerViewModel(application: Application) : AndroidViewModel(application) {
-    private val downloader = ImageDownloader(application)
+    private val downloader = ImageDownloader(
+        context = application,
+        webExecutor = GeckoWebExecutor(GeckoRuntimeHolder.get(application)),
+    )
     private val _uiState = MutableStateFlow(PickerUiState())
     val uiState: StateFlow<PickerUiState> = _uiState.asStateFlow()
 
@@ -57,13 +61,13 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) { downloader.cleanupOldFiles() }
     }
 
-    fun onImageLongPressed(url: String, pageUrl: String?, userAgent: String) {
+    fun onImageLongPressed(url: String, pageUrl: String?) {
         previewJob?.cancel()
         _uiState.value.pending?.let { downloader.deleteLocalSource(it.url) }
-        _uiState.update { it.copy(pending = PendingImage(url = url, pageUrl = pageUrl, userAgent = userAgent)) }
+        _uiState.update { it.copy(pending = PendingImage(url = url, pageUrl = pageUrl)) }
         previewJob = viewModelScope.launch {
             val bitmap = try {
-                downloader.loadPreview(url, userAgent, pageUrl, maxSize = 1024)
+                downloader.loadPreview(url, pageUrl, maxSize = 1024)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Throwable) {
@@ -90,25 +94,29 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
     fun confirmPending() {
         val pending = _uiState.value.pending ?: return
         clearPending()
-        download(
-            sourceUrl = pending.url,
-            candidates = ImageUrlResolver.candidates(pending.url, pending.pageUrl),
-            userAgent = pending.userAgent,
-            referer = pending.pageUrl,
-        )
+        download(sourceUrl = pending.url) {
+            downloader.download(
+                candidates = ImageUrlResolver.candidates(pending.url, pending.pageUrl),
+                referer = pending.pageUrl,
+                acceptedMimeTypes = acceptedMimeTypes,
+            )
+        }
     }
 
-    /** WebViewのダウンロードボタンなどから直接ダウンロードされた場合 */
-    fun onDownloadRequested(url: String, pageUrl: String?, userAgent: String) {
-        download(sourceUrl = url, candidates = listOf(url), userAgent = userAgent, referer = pageUrl)
+    /** ページのダウンロードボタンなどから直接ダウンロードされた場合 */
+    fun onDownloadResponse(response: WebResponse) {
+        val body = response.body ?: return
+        download(sourceUrl = response.uri) {
+            downloader.saveResponse(body, response.contentType(), acceptedMimeTypes)
+        }
     }
 
-    private fun download(sourceUrl: String, candidates: List<String>, userAgent: String, referer: String?) {
+    private fun download(sourceUrl: String, obtainImage: suspend () -> DownloadedImage) {
         val sequence = ++downloadSequence
         _uiState.update { it.copy(downloadingCount = it.downloadingCount + 1) }
         viewModelScope.launch {
             try {
-                val image = downloader.download(candidates, userAgent, referer, acceptedMimeTypes)
+                val image = obtainImage()
                 if (singleSelection && sequence != downloadSequence) {
                     // より新しい画像が確定されているため、この結果は破棄する
                     image.file.delete()

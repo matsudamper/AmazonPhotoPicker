@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -12,7 +11,8 @@ val useCiDebugKeystore = ciDebugKeystoreFile != null && ciDebugKeystoreFile.exis
 
 android {
     namespace = "net.matsudamper.amazonphotopicker"
-    compileSdk = 36
+    compileSdk = 37
+    compileSdkMinor = 1
 
     defaultConfig {
         applicationId = "net.matsudamper.amazonphotopicker"
@@ -22,6 +22,14 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // GeckoView は ABI ごとにネイティブライブラリが大きいため、CI では配布・テスト対象の ABI に絞る
+        val ciAbiFilter = System.getenv("CI_ABI_FILTER")
+        if (ciAbiFilter != null) {
+            ndk {
+                abiFilters += ciAbiFilter.split(",").map { it.trim() }
+            }
+        }
     }
 
     signingConfigs {
@@ -82,7 +90,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.coil.compose)
-    implementation(libs.androidx.webkit)
+    implementation(libs.mozilla.geckoview)
     implementation(libs.androidx.swiperefreshlayout)
     debugImplementation(libs.androidx.compose.ui.tooling)
 

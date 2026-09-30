@@ -70,6 +70,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import org.mozilla.geckoview.WebResponse
 
 @Composable
 fun PickerTheme(content: @Composable () -> Unit) {
@@ -109,15 +110,15 @@ fun PickerScreen(
         }
     }
     val controller = remember {
-        AmazonPhotoWebViewController(
+        AmazonPhotoBrowserController(
             context = context,
-            listener = object : AmazonPhotoWebViewController.Listener {
-                override fun onImageLongPressed(url: String, pageUrl: String?, userAgent: String) {
-                    viewModel.onImageLongPressed(url, pageUrl, userAgent)
+            listener = object : AmazonPhotoBrowserController.Listener {
+                override fun onImageLongPressed(url: String, pageUrl: String?) {
+                    viewModel.onImageLongPressed(url, pageUrl)
                 }
 
-                override fun onDownloadRequested(url: String, mimeType: String?, pageUrl: String?, userAgent: String) {
-                    viewModel.onDownloadRequested(url, pageUrl, userAgent)
+                override fun onDownloadResponse(response: WebResponse) {
+                    viewModel.onDownloadResponse(response)
                 }
 
                 override fun onImageNotFound() {

@@ -3,15 +3,15 @@ package net.matsudamper.amazonphotopicker
 import java.net.URLDecoder
 
 /**
- * WebView内の遷移先をどう扱うかを決める。
- * Amazonのページはアプリ誘導のため `intent://` などへ遷移することがあり、WebViewでは読み込めない。
+ * ブラウザ内の遷移先をどう扱うかを決める。
+ * Amazonのページはアプリ誘導のため `intent://` などへ遷移することがあり、ブラウザ内では読み込めない。
  */
 object NavigationPolicy {
     sealed interface Decision {
-        /** WebViewでそのまま読み込む */
+        /** ブラウザでそのまま読み込む */
         data object Allow : Decision
 
-        /** 代わりに指定URLをWebViewで読み込む */
+        /** 代わりに指定URLをブラウザで読み込む */
         data class Redirect(val url: String) : Decision
 
         /** 読み込まずに無視する */
