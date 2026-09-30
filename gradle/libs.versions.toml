@@ -15,7 +15,7 @@ composablePreviewScanner = "0.9.3"
 androidxTestExtJunit = "1.3.0"
 androidxTestRunner = "1.7.0"
 espresso = "3.7.0"
-uiautomator = "2.3.0"
+uiautomator = "2.4.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
