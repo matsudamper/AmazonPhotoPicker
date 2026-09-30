@@ -158,6 +158,8 @@ class PickerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun startPending(url: String, pageUrl: String?) {
+        // GeckoView とコンテンツスクリプトの両方から同じ画像が通知されることがある
+        if (viewModelState.value.pending?.url == url) return
         previewJob?.cancel()
         viewModelState.value.pending?.let { downloader.deleteLocalSource(it.url) }
         viewModelState.update {

@@ -17,6 +17,7 @@ object GeckoRuntimeHolder {
             context.applicationContext,
             GeckoRuntimeSettings.Builder()
                 .forceUserScalableEnabled(true)
+                .consoleOutput(BuildConfig.DEBUG)
                 .build(),
         )
         runtime = created

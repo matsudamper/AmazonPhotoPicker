@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
+import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewGroup
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -210,6 +211,20 @@ class AmazonPhotoBrowserController(
         override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
             listener.onDownloadResponse(response)
         }
+
+        override fun onContextMenu(
+            session: GeckoSession,
+            screenX: Int,
+            screenY: Int,
+            element: GeckoSession.ContentDelegate.ContextElement,
+        ) {
+            Log.d(TAG, "onContextMenu type=${element.type}")
+            // コンテンツスクリプトが動かないページでも、画像そのものの長押しは選択できるようにする
+            val srcUri = element.srcUri
+            if (element.type == GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE && srcUri != null) {
+                listener.onImageLongPressed(srcUri, currentUrl)
+            }
+        }
     }
 
     private fun notifyNavigation() {
@@ -217,6 +232,7 @@ class AmazonPhotoBrowserController(
     }
 
     private fun handleBridgeMessage(message: JSONObject): GeckoResult<Any>? {
+        Log.d(TAG, "bridge message type=${message.optString("type")}")
         return when (message.optString("type")) {
             "scroll" -> {
                 scrolledFromTop = message.optBoolean("scrolledFromTop", true)
@@ -298,6 +314,7 @@ class AmazonPhotoBrowserController(
     }
 
     companion object {
+        private const val TAG = "AmazonPhotoBrowser"
         const val START_URL = "https://www.amazon.co.jp/photos/"
     }
 }

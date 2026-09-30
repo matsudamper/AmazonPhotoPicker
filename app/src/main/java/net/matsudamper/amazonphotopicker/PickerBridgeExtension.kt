@@ -19,6 +19,7 @@ class PickerBridgeExtension(private val runtime: GeckoRuntime) {
     fun attach(session: GeckoSession, handler: MessageHandler, onReady: () -> Unit) {
         runtime.webExtensionController.ensureBuiltIn(EXTENSION_URI, EXTENSION_ID).accept(
             { extension ->
+                Log.d(TAG, "拡張機能を読み込み: ${extension?.id}")
                 if (extension != null) {
                     session.webExtensionController.setMessageDelegate(
                         extension,
