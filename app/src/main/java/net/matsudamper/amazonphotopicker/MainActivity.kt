@@ -2,6 +2,7 @@ package net.matsudamper.amazonphotopicker
 
 import android.content.ClipData
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,9 +18,13 @@ class MainActivity : ComponentActivity() {
     private val isPickerMode: Boolean
         get() = intent?.action == Intent.ACTION_GET_CONTENT || intent?.action == Intent.ACTION_PICK
 
-    /** テスト用にデバッグビルドでのみ開始URLを差し替え可能にする */
+    /**
+     * 計装テストのローカルサーバーを開くため、デバッグビルドでのみ開始URLを差し替え可能にする。
+     * デバッグ版も配布しており他アプリから起動できるため、任意のページを開けないよう端末内のURLに限る。
+     */
     private val startUrl: String
-        get() = intent?.getStringExtra(EXTRA_START_URL)?.takeIf { BuildConfig.DEBUG }
+        get() = intent?.getStringExtra(EXTRA_START_URL)
+            ?.takeIf { BuildConfig.DEBUG && isLoopbackUrl(it) }
             ?: AmazonPhotoBrowserController.START_URL
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,7 +97,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun isLoopbackUrl(url: String): Boolean {
+        val uri = Uri.parse(url)
+        return uri.scheme == "http" && uri.host in LOOPBACK_HOSTS
+    }
+
     companion object {
+        private val LOOPBACK_HOSTS = setOf("127.0.0.1", "localhost")
         const val EXTRA_START_URL = "net.matsudamper.amazonphotopicker.START_URL"
     }
 }
