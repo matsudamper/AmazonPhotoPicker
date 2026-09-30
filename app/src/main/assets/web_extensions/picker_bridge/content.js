@@ -87,13 +87,13 @@
       ? content.fetch.bind(content)
       : fetch;
     const blob = await (await fetchInPage(url)).blob();
-    const start = await sendToNative({ type: "blobStart" });
+    const token = await sendToNative({ type: "blobStart" });
     for (let offset = 0; offset < blob.size; offset += BLOB_CHUNK_SIZE) {
       const buffer = await blob.slice(offset, offset + BLOB_CHUNK_SIZE).arrayBuffer();
-      const result = await sendToNative({ type: "blobChunk", token: start.token, data: toBase64(buffer) });
-      if (!result || !result.ok) return;
+      const written = await sendToNative({ type: "blobChunk", token: token, data: toBase64(buffer) });
+      if (!written) return;
     }
-    await sendToNative({ type: "blobEnd", token: start.token, mimeType: blob.type || null });
+    await sendToNative({ type: "blobEnd", token: token, mimeType: blob.type || null });
   }
 
   window.addEventListener("touchstart", function (event) {

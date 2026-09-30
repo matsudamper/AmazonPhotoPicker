@@ -272,7 +272,8 @@ class AmazonPhotoBrowserController(
         blobDir.mkdirs()
         val file = File(blobDir, "blob-$token.tmp")
         blobTransfers[token] = BlobTransfer(file, file.outputStream().buffered())
-        return GeckoResult.fromValue(JSONObject().put("token", token))
+        // ネイティブからの応答は GeckoBundle に変換できる文字列・数値・真偽値のみ受け付けられ、JSONObject は失敗する
+        return GeckoResult.fromValue(token)
     }
 
     private fun writeBlobChunk(token: String, base64: String): GeckoResult<Any> {
@@ -283,7 +284,7 @@ class AmazonPhotoBrowserController(
                 transfer.output.write(Base64.decode(base64, Base64.DEFAULT))
             }.isSuccess
             if (!ok) discardBlob(token)
-            result.complete(JSONObject().put("ok", ok))
+            result.complete(ok)
         }
         return result
     }
