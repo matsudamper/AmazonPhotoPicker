@@ -221,9 +221,14 @@ class AmazonPhotoBrowserController(
             element: GeckoSession.ContentDelegate.ContextElement,
         ) {
             Log.d(TAG, "onContextMenu type=${element.type}")
-            // コンテンツスクリプトが動かないページでも、画像そのものの長押しは選択できるようにする
+            // コンテンツスクリプトが動かないページでも、画像そのものの長押しは選択できるようにする。
+            // blob: はページ内でしか取得できないため、コンテンツスクリプトの転送完了を待つ
             val srcUri = element.srcUri
-            if (element.type == GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE && srcUri != null) {
+            if (
+                element.type == GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE &&
+                srcUri != null &&
+                !srcUri.startsWith("blob:")
+            ) {
                 listener.onImageLongPressed(srcUri, currentUrl)
             }
         }
