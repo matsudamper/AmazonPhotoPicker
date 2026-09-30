@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.LifecycleStartEffect
 import coil3.compose.AsyncImage
 import net.engawapg.lib.zoomable.rememberZoomState
 import net.engawapg.lib.zoomable.zoomable
@@ -142,6 +143,10 @@ fun PickerScreen(
     DisposableEffect(controller) {
         controller.loadInitial(startUrl)
         onDispose { controller.destroy() }
+    }
+    LifecycleStartEffect(controller) {
+        controller.onStart()
+        onStopOrDispose { controller.onStop() }
     }
     LaunchedEffect(desktopMode) {
         controller.setDesktopMode(desktopMode)

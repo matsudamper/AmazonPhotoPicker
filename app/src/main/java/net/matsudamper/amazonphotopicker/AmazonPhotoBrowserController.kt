@@ -48,6 +48,9 @@ class AmazonPhotoBrowserController(
     private val blobTransfers = ConcurrentHashMap<String, BlobTransfer>()
     private val blobWriteExecutor = Executors.newSingleThreadExecutor()
     private var currentUrl: String? = null
+    private var lastSessionState: GeckoSession.SessionState? = null
+    private var isStarted = false
+    private var reopenOnStart = false
     private var initialLoadRequested = false
     private var canGoBack = false
     private var progress = 0
@@ -134,6 +137,18 @@ class AmazonPhotoBrowserController(
         session.reload()
     }
 
+    fun onStart() {
+        isStarted = true
+        if (reopenOnStart) {
+            reopenOnStart = false
+            reopenSession()
+        }
+    }
+
+    fun onStop() {
+        isStarted = false
+    }
+
     fun destroy() {
         geckoView.releaseSession()
         session.close()
@@ -207,11 +222,26 @@ class AmazonPhotoBrowserController(
             this@AmazonPhotoBrowserController.progress = progress
             notifyNavigation()
         }
+
+        override fun onSessionStateChange(session: GeckoSession, sessionState: GeckoSession.SessionState) {
+            lastSessionState = sessionState
+        }
     }
 
     private fun createContentDelegate() = object : GeckoSession.ContentDelegate {
         override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
             listener.onDownloadResponse(response)
+        }
+
+        override fun onKill(session: GeckoSession) {
+            // バックグラウンド中にメモリ不足でコンテンツプロセスが kill されると、セッションが閉じて画面が空になる
+            Log.w(TAG, "コンテンツプロセスが kill されたためセッションを復元")
+            reopenSessionWhenStarted()
+        }
+
+        override fun onCrash(session: GeckoSession) {
+            Log.w(TAG, "コンテンツプロセスがクラッシュしたためセッションを復元")
+            reopenSessionWhenStarted()
         }
 
         override fun onContextMenu(
@@ -231,6 +261,28 @@ class AmazonPhotoBrowserController(
             ) {
                 listener.onImageLongPressed(srcUri, currentUrl)
             }
+        }
+    }
+
+    /** バックグラウンド中に開き直すと解放されたメモリを再確保して再び kill されるため、表示されるまで待つ */
+    private fun reopenSessionWhenStarted() {
+        if (isStarted) {
+            reopenSession()
+        } else {
+            reopenOnStart = true
+        }
+    }
+
+    private fun reopenSession() {
+        if (session.isOpen) return
+        cancelBlobTransfers()
+        rootView.isRefreshing = false
+        session.open(runtime)
+        val state = lastSessionState
+        if (state != null) {
+            session.restoreState(state)
+        } else {
+            session.loadUri(currentUrl ?: START_URL)
         }
     }
 
