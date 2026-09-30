@@ -88,6 +88,9 @@ class AmazonPhotoBrowserController(
     var isDesktopMode: Boolean = false
         private set
 
+    /** バックジェスチャーの長押しで画像選択が始まらないよう、ジェスチャー中の長押しは無視する */
+    var isBackGestureInProgress: Boolean = false
+
     init {
         session.navigationDelegate = createNavigationDelegate()
         session.progressDelegate = createProgressDelegate()
@@ -251,6 +254,7 @@ class AmazonPhotoBrowserController(
             element: GeckoSession.ContentDelegate.ContextElement,
         ) {
             Log.d(TAG, "onContextMenu type=${element.type}")
+            if (isBackGestureInProgress) return
             // コンテンツスクリプトが動かないページでも、画像そのものの長押しは選択できるようにする。
             // blob: はページ内でしか取得できないため、コンテンツスクリプトの転送完了を待つ
             val srcUri = element.srcUri
@@ -298,6 +302,7 @@ class AmazonPhotoBrowserController(
                 null
             }
             "image" -> {
+                if (isBackGestureInProgress) return null
                 val url = message.optString("url").takeIf { !message.isNull("url") && it.isNotBlank() }
                 if (url == null) {
                     listener.onImageNotFound()
@@ -320,6 +325,8 @@ class AmazonPhotoBrowserController(
     }
 
     private fun startBlob(): GeckoResult<Any> {
+        // 登録されていないトークンを返すと、チャンクの書き込みが失敗してページ側の転送が止まる
+        if (isBackGestureInProgress) return GeckoResult.fromValue(IGNORED_BLOB_TOKEN)
         val token = UUID.randomUUID().toString()
         blobDir.mkdirs()
         val file = File(blobDir, "blob-$token.tmp")
@@ -375,6 +382,7 @@ class AmazonPhotoBrowserController(
 
     companion object {
         private const val TAG = "AmazonPhotoBrowser"
+        private const val IGNORED_BLOB_TOKEN = "ignored"
         const val START_URL = "https://www.amazon.co.jp/photos/"
     }
 }

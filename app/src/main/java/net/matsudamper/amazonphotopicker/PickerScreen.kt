@@ -1,7 +1,7 @@
 package net.matsudamper.amazonphotopicker
 
 import android.os.Build
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -152,8 +152,14 @@ fun PickerScreen(
         controller.setDesktopMode(desktopMode)
     }
 
-    BackHandler(enabled = canGoBack) {
-        controller.goBack()
+    PredictiveBackHandler(enabled = canGoBack) { backEvents ->
+        controller.isBackGestureInProgress = true
+        try {
+            backEvents.collect {}
+            controller.goBack()
+        } finally {
+            controller.isBackGestureInProgress = false
+        }
     }
 
     PickerScreenContent(
