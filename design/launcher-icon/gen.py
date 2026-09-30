@@ -77,6 +77,52 @@ patterns.append(dict(
           P(tile(3) + " " + check(65, 65, 11, 2.6), MONO, evenodd=True)],
 ))
 
+
+# ---------- D: 段ボール箱から写真 ----------
+NAVY, ORANGE = "#232F3E", "#FF9900"
+patterns.append(dict(
+    id="box-photo", name="Box Photo", ja="配送箱から出てくる写真（ネイビー×オレンジ）",
+    bg=[P(FULL, NAVY)],
+    fg=[P(rrect(40, 30, 68, 60, 3), "#FFFFFF"),
+        P(rrect(43, 33, 65, 57, 1), "#DCE6FF"),
+        P("M43,57 L51,44 L56,50 L59.5,46.5 L65,53 V57 Z", "#37475A"),
+        P(circle(59.5, 38.5, 3), ORANGE),
+        P("M33,56 L26,48 L42,48 L47,56 Z", "#A8713A"),
+        P("M75,56 L82,48 L66,48 L61,56 Z", "#A8713A"),
+        P(rrect(33, 56, 75, 77, 2), "#C98D52"),
+        P("M33,62 H75 V64.5 H33 Z", ORANGE)],
+    mono=[P("M41.5,45 V34.5 A3,3 0 0 1 44.5,31.5 H63.5 A3,3 0 0 1 66.5,34.5 V45", None, stroke=MONO, sw=3),
+          P("M45,45 L51,37.5 L55,42 L58,39 L63,45 Z", MONO),
+          P(circle(59.5, 35.5, 2.2), MONO),
+          P("M33,56 L26,48 L42,48 L47,56 Z", MONO),
+          P("M75,56 L82,48 L66,48 L61,56 Z", MONO),
+          P(rrect(33, 58, 75, 77, 2) + " M36,62 H72 V64.5 H36 Z", MONO, evenodd=True)],
+))
+
+# ---------- E: 写真カード＋チェック（Amazon 系配色） ----------
+patterns.append(dict(
+    id="photo-check-navy", name="Photo Check Navy", ja="案Aをネイビー×オレンジ配色に",
+    bg=[P(FULL, NAVY)],
+    fg=[P(rrect(32, 36, 76, 70, 5), "#FFFFFF"),
+        P(rrect(35, 39, 73, 67, 1.5), "#E3EAF3"),
+        P("M35,67 L46,52 L53,60 L58,55 L69,67 Z", "#37475A"),
+        P(circle(64, 46, 3.5), ORANGE),
+        P(circle(bx, by, 11.5), NAVY),
+        P(circle(bx, by, 8.5), ORANGE),
+        P(check(bx, by, 10, 2.4), NAVY)],
+    mono=patterns[0]["mono"],
+))
+
+# ---------- F: 頭文字 A ＝ 山 ----------
+A_OUT = "M54,31 L77,75 H66 L54,50 L42,75 H31 Z"
+A_BAR = "M45,62 H63 V67.5 H45 Z"
+patterns.append(dict(
+    id="letter-a", name="Letter A", ja="頭文字「A」を写真の山に見立てる",
+    bg=[P(FULL, NAVY)],
+    fg=[P(A_OUT, ORANGE), P(A_BAR, ORANGE), P(circle(71, 40, 4.5), "#FFFFFF")],
+    mono=[P(A_OUT, MONO), P(A_BAR, MONO), P(circle(71, 40, 4.5), MONO)],
+))
+
 # ---------- 出力 ----------
 def svg_paths(paths, color=None):
     out = []
