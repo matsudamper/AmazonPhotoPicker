@@ -224,6 +224,26 @@ jobs:
           name: paparazzi-snapshots
           path: app/src/test/snapshots/images
 
+      - name: Build Paparazzi snapshot HTML
+        if: always()
+        run: python3 .github/scripts/build-paparazzi-html.py app/src/test/snapshots/images paparazzi-snapshots.html
+
+      - name: Upload Paparazzi snapshot HTML
+        if: always()
+        id: paparazzi_html_artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: paparazzi-snapshots.html
+          path: paparazzi-snapshots.html
+          archive: false
+
+      - name: Post Paparazzi snapshot URL to summary
+        if: always() && steps.paparazzi_html_artifact.outputs.artifact-url != ''
+        env:
+          HTML_URL: ${{ steps.paparazzi_html_artifact.outputs.artifact-url }}
+        run: |
+          echo "Paparazzi snapshots: ${HTML_URL}" >> "$GITHUB_STEP_SUMMARY"
+
   android-test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
