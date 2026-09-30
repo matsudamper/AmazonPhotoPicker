@@ -1,0 +1,3 @@
+package net.matsudamper.amazonphotopicker
+
+interface PaparazziTestCategory
