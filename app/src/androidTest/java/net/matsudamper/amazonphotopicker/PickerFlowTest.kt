@@ -79,6 +79,7 @@ class PickerFlowTest {
 
     @After
     fun tearDown() {
+        StartUrlOverride.url = null
         server.close()
     }
 
@@ -152,8 +153,8 @@ class PickerFlowTest {
             type = "image/*"
             addCategory(Intent.CATEGORY_OPENABLE)
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
-            putExtra(MainActivity.EXTRA_START_URL, server.baseUrl + page)
         }
+        StartUrlOverride.url = server.baseUrl + page
         return ActivityScenario.launchActivityForResult(intent)
     }
 
