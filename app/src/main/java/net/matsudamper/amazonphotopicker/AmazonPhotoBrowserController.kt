@@ -64,7 +64,6 @@ class AmazonPhotoBrowserController(
     )
 
     private val geckoView = GeckoView(context).apply {
-        id = R.id.amazon_photo_browser
         layoutParams = ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,

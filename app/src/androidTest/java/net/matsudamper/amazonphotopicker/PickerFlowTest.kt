@@ -15,9 +15,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.Until
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -160,12 +158,12 @@ class PickerFlowTest {
 
     /** ページを長押しし、確認ダイアログで「選択」を押す。ページ読み込み待ちのためリトライする */
     private fun longPressAndSelect() {
-        val browser = requireNotNull(
-            device.wait(Until.findObject(By.res(context.packageName, "amazon_photo_browser")), TIMEOUT),
-        )
+        // GeckoView は独自のアクセシビリティツリーを公開し UiAutomator から見つけられないことがあるため、
+        // ブラウザ領域が占める画面中央を長押しする
+        val centerX = device.displayWidth / 2
+        val centerY = device.displayHeight / 2
         repeat(10) { attempt ->
-            val bounds = browser.visibleBounds
-            device.swipe(bounds.centerX(), bounds.centerY(), bounds.centerX(), bounds.centerY(), 150)
+            device.swipe(centerX, centerY, centerX, centerY, 150)
             val shown = runCatching {
                 composeRule.waitUntilAtLeastOneExists(hasText("この画像を選択しますか？"), 3_000)
             }.isSuccess
