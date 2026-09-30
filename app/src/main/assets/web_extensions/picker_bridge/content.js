@@ -71,26 +71,40 @@
     return !!(root && root.scrollTop > 0);
   }
 
-  function toBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  // コンテンツスクリプトの fetch はページのオリジンを含む権限で動くため blob: を読めるが、
+  // 読めない環境に備えてページのコンテキストの fetch にも切り替える
+  async function fetchBlob(url) {
+    try {
+      return await (await fetch(url)).blob();
+    } catch (error) {
+      console.warn("picker-bridge: fetch failed, retry in page context", String(error));
+      return await (await content.fetch(url)).blob();
     }
-    return btoa(binary);
+  }
+
+  // ページ由来の Blob の ArrayBuffer はサンドボックス越しに扱えないことがあるため、FileReader で文字列化する
+  function readChunkAsBase64(blob, start, end) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        const dataUrl = reader.result;
+        resolve(dataUrl.substring(dataUrl.indexOf(",") + 1));
+      };
+      reader.onerror = function () {
+        reject(reader.error);
+      };
+      reader.readAsDataURL(blob.slice(start, end));
+    });
   }
 
   // blob は巨大になりうるため、一度に文字列化せずチャンク単位でネイティブへ渡す
   async function transferBlob(url) {
-    // blob: URL はページのオリジンに属するため、ページのコンテキストで取得する
-    const fetchInPage = typeof content !== "undefined" && content.fetch
-      ? content.fetch.bind(content)
-      : fetch;
-    const blob = await (await fetchInPage(url)).blob();
+    const blob = await fetchBlob(url);
     const token = await sendToNative({ type: "blobStart" });
     for (let offset = 0; offset < blob.size; offset += BLOB_CHUNK_SIZE) {
-      const buffer = await blob.slice(offset, offset + BLOB_CHUNK_SIZE).arrayBuffer();
-      const written = await sendToNative({ type: "blobChunk", token: token, data: toBase64(buffer) });
+      const end = Math.min(offset + BLOB_CHUNK_SIZE, blob.size);
+      const data = await readChunkAsBase64(blob, offset, end);
+      const written = await sendToNative({ type: "blobChunk", token: token, data: data });
       if (!written) return;
     }
     await sendToNative({ type: "blobEnd", token: token, mimeType: blob.type || null });
@@ -106,7 +120,8 @@
   window.addEventListener("contextmenu", function (event) {
     const url = findImageUrl(event.clientX, event.clientY);
     if (url && url.startsWith("blob:")) {
-      transferBlob(url).catch(function () {
+      transferBlob(url).catch(function (error) {
+        console.error("picker-bridge: blob transfer failed", String(error));
         sendToNative({ type: "image", url: null }).catch(function () {});
       });
       return;
