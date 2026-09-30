@@ -48,6 +48,7 @@ class AmazonPhotoBrowserController(
     private val blobTransfers = ConcurrentHashMap<String, BlobTransfer>()
     private val blobWriteExecutor = Executors.newSingleThreadExecutor()
     private var currentUrl: String? = null
+    private var initialLoadRequested = false
     private var canGoBack = false
     private var progress = 0
 
@@ -101,10 +102,12 @@ class AmazonPhotoBrowserController(
     }
 
     fun loadInitial(url: String) {
-        if (currentUrl != null) return
+        // GeckoSession は開いた直後に about:blank を読み込むため、現在の URL では初回かどうかを判定できない
+        if (initialLoadRequested) return
+        initialLoadRequested = true
         // コンテンツスクリプトが最初のページから効くよう、拡張機能の準備を待ってから読み込む
         bridgeExtension.attach(session, ::handleBridgeMessage) {
-            if (currentUrl == null) session.loadUri(url)
+            session.loadUri(url)
         }
     }
 
