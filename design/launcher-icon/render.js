@@ -21,7 +21,6 @@ const store = m => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72
       await shot(legacy(m, false), s, `${OUT}/${m.id}/res/mipmap-${d}/ic_launcher.png`);
       await shot(legacy(m, true), s, `${OUT}/${m.id}/res/mipmap-${d}/ic_launcher_round.png`);
     }
-    await shot(store(m), 512, `${OUT}/${m.id}/ic_launcher-playstore.png`);
   }
   // 確認用シート
   const cell = (inner) => `<div style="width:160px;height:160px">${inner}</div>`;

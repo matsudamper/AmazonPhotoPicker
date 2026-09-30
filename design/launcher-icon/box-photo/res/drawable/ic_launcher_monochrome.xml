@@ -25,5 +25,14 @@
     <path
         android:fillColor="#000000"
         android:fillType="evenOdd"
-        android:pathData="M35,58 H73 A2,2 0 0 1 75,60 V75 A2,2 0 0 1 73,77 H35 A2,2 0 0 1 33,75 V60 A2,2 0 0 1 35,58 Z M36,62 H72 V64.5 H36 Z" />
+        android:pathData="M35,58 H73 A2,2 0 0 1 75,60 V75 A2,2 0 0 1 73,77 H35 A2,2 0 0 1 33,75 V60 A2,2 0 0 1 35,58 Z M36.0,60.5 H72.0 A0.5,0.5 0 0 1 72.5,61.0 V74.0 A0.5,0.5 0 0 1 72.0,74.5 H36.0 A0.5,0.5 0 0 1 35.5,74.0 V61.0 A0.5,0.5 0 0 1 36.0,60.5 Z" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M41,64 Q53,70 65,64" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M68.84,62.08 L65.7,68.01 L62.21,61.03 Z" />
 </vector>

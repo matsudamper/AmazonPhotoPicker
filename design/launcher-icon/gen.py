@@ -78,10 +78,24 @@ patterns.append(dict(
 ))
 
 
-# ---------- D: 段ボール箱から写真 ----------
+# ---------- Amazon 風スマイル矢印 ----------
 NAVY, ORANGE = "#232F3E", "#FF9900"
+
+def smile(cx, y, w, depth, sw, color, mono=False):
+    x0, x2 = cx - w / 2, cx + w / 2
+    c = (cx, y + depth * 2)
+    tx, ty = x2 - c[0], y - c[1]; l = math.hypot(tx, ty); tx, ty = tx / l, ty / l
+    nx, ny = -ty, tx
+    a = sw * 1.5
+    tip = (x2 + tx * a * 1.1, y + ty * a * 1.1)
+    b1 = (x2 - tx * a * 0.3 + nx * a, y - ty * a * 0.3 + ny * a)
+    b2 = (x2 - tx * a * 0.3 - nx * a, y - ty * a * 0.3 - ny * a)
+    return [P(f"M{fmt(x0)},{fmt(y)} Q{fmt(c[0])},{fmt(c[1])} {fmt(x2)},{fmt(y)}", None, stroke=color, sw=sw),
+            P(f"M{fmt(tip[0])},{fmt(tip[1])} L{fmt(b1[0])},{fmt(b1[1])} L{fmt(b2[0])},{fmt(b2[1])} Z", color)]
+
+# ---------- D: スマイル付き配送箱から写真 ----------
 patterns.append(dict(
-    id="box-photo", name="Box Photo", ja="配送箱から出てくる写真（ネイビー×オレンジ）",
+    id="box-photo", name="Smile Box", ja="スマイル付きの配送箱から出てくる写真",
     bg=[P(FULL, NAVY)],
     fg=[P(rrect(40, 30, 68, 60, 3), "#FFFFFF"),
         P(rrect(43, 33, 65, 57, 1), "#DCE6FF"),
@@ -89,38 +103,38 @@ patterns.append(dict(
         P(circle(59.5, 38.5, 3), ORANGE),
         P("M33,56 L26,48 L42,48 L47,56 Z", "#A8713A"),
         P("M75,56 L82,48 L66,48 L61,56 Z", "#A8713A"),
-        P(rrect(33, 56, 75, 77, 2), "#C98D52"),
-        P("M33,62 H75 V64.5 H33 Z", ORANGE)],
+        P(rrect(33, 56, 75, 77, 2), "#C98D52")] + smile(53, 64, 24, 3, 2.6, NAVY),
     mono=[P("M41.5,45 V34.5 A3,3 0 0 1 44.5,31.5 H63.5 A3,3 0 0 1 66.5,34.5 V45", None, stroke=MONO, sw=3),
           P("M45,45 L51,37.5 L55,42 L58,39 L63,45 Z", MONO),
           P(circle(59.5, 35.5, 2.2), MONO),
           P("M33,56 L26,48 L42,48 L47,56 Z", MONO),
           P("M75,56 L82,48 L66,48 L61,56 Z", MONO),
-          P(rrect(33, 58, 75, 77, 2) + " M36,62 H72 V64.5 H36 Z", MONO, evenodd=True)],
+          P(rrect(33, 58, 75, 77, 2) + " " + rrect(35.5, 60.5, 72.5, 74.5, 0.5), MONO, evenodd=True)]
+         + smile(53, 64, 24, 3, 2.6, MONO),
 ))
 
-# ---------- E: 写真カード＋チェック（Amazon 系配色） ----------
+# ---------- E: 写真＋スマイル ----------
 patterns.append(dict(
-    id="photo-check-navy", name="Photo Check Navy", ja="案Aをネイビー×オレンジ配色に",
+    id="smile-photo", name="Smile Photo", ja="写真カードの下にスマイル矢印",
     bg=[P(FULL, NAVY)],
-    fg=[P(rrect(32, 36, 76, 70, 5), "#FFFFFF"),
-        P(rrect(35, 39, 73, 67, 1.5), "#E3EAF3"),
-        P("M35,67 L46,52 L53,60 L58,55 L69,67 Z", "#37475A"),
-        P(circle(64, 46, 3.5), ORANGE),
-        P(circle(bx, by, 11.5), NAVY),
-        P(circle(bx, by, 8.5), ORANGE),
-        P(check(bx, by, 10, 2.4), NAVY)],
-    mono=patterns[0]["mono"],
+    fg=[P(rrect(34, 30, 74, 62, 4), "#FFFFFF"),
+        P(rrect(37, 33, 71, 59, 1.5), "#E3EAF3"),
+        P("M37,59 L47,45 L54,53 L59,48 L71,59 Z", "#37475A"),
+        P(circle(63, 40, 3.5), ORANGE)] + smile(53, 69, 34, 4.5, 4, ORANGE),
+    mono=[P(rrect(35.5, 31.5, 72.5, 60.5, 3), None, stroke=MONO, sw=3),
+          P("M39,57.5 L47,46.5 L54,54.5 L59,49.5 L69,57.5 Z", MONO),
+          P(circle(63, 40, 3.5), MONO)] + smile(53, 69, 34, 4.5, 4, MONO),
 ))
 
-# ---------- F: 頭文字 A ＝ 山 ----------
-A_OUT = "M54,31 L77,75 H66 L54,50 L42,75 H31 Z"
-A_BAR = "M45,62 H63 V67.5 H45 Z"
+# ---------- F: 頭文字 A ＋ スマイル ----------
+A_OUT = "M54,29 L73,65 H64 L54,45 L44,65 H35 Z"
+A_BAR = "M46,55 H62 V59.5 H46 Z"
 patterns.append(dict(
-    id="letter-a", name="Letter A", ja="頭文字「A」を写真の山に見立てる",
+    id="letter-a", name="Smile A", ja="頭文字「A」（山）＋スマイル矢印",
     bg=[P(FULL, NAVY)],
-    fg=[P(A_OUT, ORANGE), P(A_BAR, ORANGE), P(circle(71, 40, 4.5), "#FFFFFF")],
-    mono=[P(A_OUT, MONO), P(A_BAR, MONO), P(circle(71, 40, 4.5), MONO)],
+    fg=[P(A_OUT, "#FFFFFF"), P(A_BAR, "#FFFFFF"), P(circle(69, 37, 3.8), ORANGE)]
+       + smile(53, 71, 36, 4, 4, ORANGE),
+    mono=[P(A_OUT, MONO), P(A_BAR, MONO), P(circle(69, 37, 3.8), MONO)] + smile(53, 71, 36, 4, 4, MONO),
 ))
 
 # ---------- 出力 ----------
