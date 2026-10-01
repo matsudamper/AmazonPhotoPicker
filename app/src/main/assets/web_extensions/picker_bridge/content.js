@@ -98,9 +98,18 @@
   }
 
   // blob は巨大になりうるため、一度に文字列化せずチャンク単位でネイティブへ渡す
+  // ネイティブがバックジェスチャー中かを contextmenu の発生時点で判定できるよう、取得より先に転送を始める
   async function transferBlob(url) {
-    const blob = await fetchBlob(url);
     const token = await sendToNative({ type: "blobStart" });
+    let blob;
+    try {
+      blob = await fetchBlob(url);
+    } catch (error) {
+      console.error("picker-bridge: blob fetch failed", String(error));
+      // 空のまま終えると、ネイティブ側で一時ファイルを破棄して画像が見つからなかった扱いになる
+      await sendToNative({ type: "blobEnd", token: token, mimeType: null });
+      return;
+    }
     for (let offset = 0; offset < blob.size; offset += BLOB_CHUNK_SIZE) {
       const end = Math.min(offset + BLOB_CHUNK_SIZE, blob.size);
       const data = await readChunkAsBase64(blob, offset, end);
