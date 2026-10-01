@@ -5,9 +5,11 @@ import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import org.json.JSONObject
@@ -22,6 +24,7 @@ import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import kotlin.math.abs
 
 /**
  * Amazon Photos を表示する GeckoView を保持し、画像の長押しを検出する。
@@ -59,6 +62,17 @@ class AmazonPhotoBrowserController(
     @Volatile
     private var scrolledFromTop = true
 
+    // システムのバックジェスチャーに奪われたタッチや、JS フリーズ中に滞留したタッチも Gecko は
+    // 長押しと判定することがあるため、実際のジェスチャーを記録して長押しを抑制する。
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var hasTouchGestureRecord = false
+    private var isTouchGestureActive = false
+    private var touchGestureMoved = false
+    private var touchGestureDownX = 0f
+    private var touchGestureDownY = 0f
+    private var touchGestureStartedAtMs = 0L
+    private var touchGestureEndedAtMs = 0L
+
     private val session = GeckoSession(
         GeckoSessionSettings.Builder()
             .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
@@ -88,16 +102,49 @@ class AmazonPhotoBrowserController(
     var isDesktopMode: Boolean = false
         private set
 
+    /** バックジェスチャーの長押しで画像選択が始まらないよう、ジェスチャー中の長押しは無視する */
+    var isBackGestureInProgress: Boolean = false
+
     init {
         session.navigationDelegate = createNavigationDelegate()
         session.progressDelegate = createProgressDelegate()
         session.contentDelegate = createContentDelegate()
         session.open(runtime)
         geckoView.setSession(session)
+        // キーボード操作由来のメニューを過去のタッチ記録で抑制しないよう、キー入力でタッチ記録を解除する
+        geckoView.setOnKeyListener { _, _, _ ->
+            onNonTouchInput()
+            false
+        }
         geckoView.setOnTouchListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                // ページからスクロール位置が届くまでは更新しない側に倒す
-                scrolledFromTop = true
+            if (event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) {
+                onNonTouchInput()
+                return@setOnTouchListener false
+            }
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // ページからスクロール位置が届くまでは更新しない側に倒す
+                    scrolledFromTop = true
+                    hasTouchGestureRecord = true
+                    isTouchGestureActive = true
+                    touchGestureMoved = false
+                    touchGestureDownX = event.x
+                    touchGestureDownY = event.y
+                    touchGestureStartedAtMs = SystemClock.elapsedRealtime()
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> touchGestureMoved = true
+                MotionEvent.ACTION_MOVE -> {
+                    if (
+                        abs(event.x - touchGestureDownX) > touchSlop ||
+                        abs(event.y - touchGestureDownY) > touchSlop
+                    ) {
+                        touchGestureMoved = true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isTouchGestureActive = false
+                    touchGestureEndedAtMs = SystemClock.elapsedRealtime()
+                }
             }
             false
         }
@@ -251,6 +298,7 @@ class AmazonPhotoBrowserController(
             element: GeckoSession.ContentDelegate.ContextElement,
         ) {
             Log.d(TAG, "onContextMenu type=${element.type}")
+            if (!shouldHandleLongPress()) return
             // コンテンツスクリプトが動かないページでも、画像そのものの長押しは選択できるようにする。
             // blob: はページ内でしか取得できないため、コンテンツスクリプトの転送完了を待つ
             val srcUri = element.srcUri
@@ -286,6 +334,24 @@ class AmazonPhotoBrowserController(
         }
     }
 
+    /** タッチ操作中の入力は現在のジェスチャーを壊さないよう無視する */
+    private fun onNonTouchInput() {
+        if (isTouchGestureActive) return
+        hasTouchGestureRecord = false
+    }
+
+    private fun shouldHandleLongPress(): Boolean {
+        if (isBackGestureInProgress) return false
+        val now = SystemClock.elapsedRealtime()
+        return shouldShowContextMenuForGesture(
+            hasTouchGestureRecord = hasTouchGestureRecord,
+            isTouchGestureActive = isTouchGestureActive,
+            gestureMoved = touchGestureMoved,
+            elapsedSinceGestureStartMs = now - touchGestureStartedAtMs,
+            elapsedSinceGestureEndMs = now - touchGestureEndedAtMs,
+        )
+    }
+
     private fun notifyNavigation() {
         listener.onNavigationStateChanged(canGoBack, progress)
     }
@@ -298,6 +364,7 @@ class AmazonPhotoBrowserController(
                 null
             }
             "image" -> {
+                if (!shouldHandleLongPress()) return null
                 val url = message.optString("url").takeIf { !message.isNull("url") && it.isNotBlank() }
                 if (url == null) {
                     listener.onImageNotFound()
@@ -320,6 +387,8 @@ class AmazonPhotoBrowserController(
     }
 
     private fun startBlob(): GeckoResult<Any> {
+        // 登録されていないトークンを返すと、チャンクの書き込みが失敗してページ側の転送が止まる
+        if (!shouldHandleLongPress()) return GeckoResult.fromValue(IGNORED_BLOB_TOKEN)
         val token = UUID.randomUUID().toString()
         blobDir.mkdirs()
         val file = File(blobDir, "blob-$token.tmp")
@@ -375,6 +444,7 @@ class AmazonPhotoBrowserController(
 
     companion object {
         private const val TAG = "AmazonPhotoBrowser"
+        private const val IGNORED_BLOB_TOKEN = "ignored"
         const val START_URL = "https://www.amazon.co.jp/photos/"
     }
 }
