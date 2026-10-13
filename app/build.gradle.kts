@@ -13,7 +13,7 @@ val useCiDebugKeystore = ciDebugKeystoreFile != null && ciDebugKeystoreFile.exis
 android {
     namespace = "net.matsudamper.amazonphotopicker"
     compileSdk = 37
-    compileSdkMinor = 1
+    compileSdkMinor = 2
 
     defaultConfig {
         applicationId = "net.matsudamper.amazonphotopicker"
