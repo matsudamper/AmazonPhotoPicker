@@ -13,9 +13,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/setup.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/setup.sh\"",
+            "timeout": 900
           }
-        ]
+        ],
+        "matcher": "startup|resume"
       }
     ]
   },
